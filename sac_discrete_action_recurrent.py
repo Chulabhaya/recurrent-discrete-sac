@@ -8,16 +8,13 @@ from distutils.util import strtobool
 import gym
 import numpy as np
 import torch
-import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
-from torch.distributions import Categorical
-from torch.nn.utils import clip_grad_norm_
 from torch.utils.tensorboard import SummaryWriter
-from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
 
+from models import RecurrentDiscreteActor, RecurrentDiscreteCritic
 from utils import ReplayBuffer
-import pomdps
+
 
 def parse_args():
     # fmt: off
@@ -92,6 +89,7 @@ def make_env(env_id, seed, idx, capture_video, run_name):
     env : gym environment
         Gym environment to be used for learning.
     """
+
     def thunk():
         env = gym.make(env_id)
         env = gym.wrappers.RecordEpisodeStatistics(env)
@@ -104,134 +102,6 @@ def make_env(env_id, seed, idx, capture_video, run_name):
         return env
 
     return thunk
-
-# ALGO LOGIC: initialize agent here:
-class SoftQNetwork(nn.Module):
-    """Critic (Value) network."""
-    def __init__(self, env):
-        """Initialize the critic model.
-
-        Parameters
-        ----------
-        env : gym environment
-            Gym environment being used for learning.
-        """
-        super().__init__()
-        self.fc1 = nn.Linear(
-            np.array(env.single_observation_space.shape).prod(),
-            256
-        )
-        self.lstm1 = nn.LSTM(256, 256)
-        self.fc2 = nn.Linear(256, 256)
-        self.fc3 = nn.Linear(256, env.single_action_space.n)
-
-    def forward(self, x, seq_lengths):
-        """
-        Calculates Q-values for each state-action.
-
-        Parameters
-        ----------
-        x : tensor
-            State or observation.
-
-        Returns
-        -------
-        q_values : tensor
-            Q-values for all actions possible with input state.
-        """
-        # Embedding layer
-        x = F.relu(self.fc1(x))
-
-        # Padded LSTM layer
-        x = pack_padded_sequence(x, seq_lengths, enforce_sorted=False)
-        self.lstm1.flatten_parameters()
-        x, _ = self.lstm1(x)
-        x, x_unpacked_len = pad_packed_sequence(x)
-
-        # Remaining layers
-        x = F.relu(self.fc2(x))
-        q_values = self.fc3(x)
-        return q_values
-
-
-class Actor(nn.Module):
-    """Actor (Policy) network."""
-    def __init__(self, env):
-        """Initialize the actor model.
-
-        Parameters
-        ----------
-        env : gym environment
-            Gym environment being used for learning.
-        """
-        super().__init__()
-        self.fc1 = nn.Linear(np.array(env.single_observation_space.shape).prod(), 256)
-        self.lstm1 = nn.LSTM(256, 256)
-        self.fc2 = nn.Linear(256, 256)
-        self.fc_out = nn.Linear(256, env.single_action_space.n)
-        self.softmax = nn.Softmax(dim=-1)
-
-
-    def forward(self, x, seq_lengths, in_hidden=None):
-        """
-        Calculates probabilities for taking each action given a state.
-
-        Parameters
-        ----------
-        x : tensor
-            State or observation.
-
-        Returns
-        -------
-        action_probs : tensor
-            Probabilities for all actions possible with input state.
-        """
-        # Embedding layer
-        x = F.relu(self.fc1(x))
-
-        # Padded LSTM layer
-        x = pack_padded_sequence(x, seq_lengths, enforce_sorted=False)
-        self.lstm1.flatten_parameters()
-        x, out_hidden = self.lstm1(x, in_hidden)
-        x, x_unpacked_len = pad_packed_sequence(x)
-
-        # Remaining layers
-        x = F.relu(self.fc2(x))
-        action_logits = self.fc_out(x)
-        action_probs = self.softmax(action_logits)
-
-        return action_probs, out_hidden
-
-    def get_action(self, x, seq_lengths, in_hidden=None, epsilon=1e-6):
-        """
-        Calculates actions by sampling from action distribution.
-
-        Parameters
-        ----------
-        x : tensor
-            Action probabilities.
-        epsilon : float
-            Used to ensure no zero probability values.
-
-        Returns
-        -------
-        action : tensor
-            Sampled action from action distribution.
-        action_probs : tensor
-            Probabilities for all actions possible with input state.
-        log_action_probs : tensor
-            Log of action probabilities, used for entropy.
-        """
-        action_probs, out_hidden = self.forward(x, seq_lengths, in_hidden)
-
-        dist = Categorical(action_probs)
-        action = dist.sample().to(x.device)
-
-        # Have to deal with situation of 0.0 probabilities because we can't do log 0
-        z = action_probs == 0.0
-        z = z.float() * 1e-8
-        log_action_probabilities = torch.log(action_probs + z)
-        return action, action_probs, log_action_probabilities, out_hidden
 
 
 if __name__ == "__main__":
@@ -274,11 +144,11 @@ if __name__ == "__main__":
     ), "only discrete action space is supported"
 
     # Initialize models and optimizers
-    actor = Actor(envs).to(device)
-    qf1 = SoftQNetwork(envs).to(device)
-    qf2 = SoftQNetwork(envs).to(device)
-    qf1_target = SoftQNetwork(envs).to(device)
-    qf2_target = SoftQNetwork(envs).to(device)
+    actor = RecurrentDiscreteActor(envs).to(device)
+    qf1 = RecurrentDiscreteCritic(envs).to(device)
+    qf2 = RecurrentDiscreteCritic(envs).to(device)
+    qf1_target = RecurrentDiscreteCritic(envs).to(device)
+    qf2_target = RecurrentDiscreteCritic(envs).to(device)
     qf1_target.load_state_dict(qf1.state_dict())
     qf2_target.load_state_dict(qf2.state_dict())
     q_optimizer = optim.Adam(
@@ -288,13 +158,10 @@ if __name__ == "__main__":
 
     # Automatic entropy tuning
     if args.autotune:
-        #target_entropy = -0.01 * torch.log(1 / torch.tensor(envs.single_action_space.n))
-        target_entropy = -torch.tensor(envs.single_action_space.n)
-        #target_entropy = torch.tensor(0.88 * np.log(envs.single_action_space.n))
+        target_entropy = -0.3 * torch.log(1 / torch.tensor(envs.single_action_space.n))
         log_alpha = torch.zeros(1, requires_grad=True, device=device)
         alpha = log_alpha.exp().item()
-        #a_optimizer = optim.Adam([log_alpha], lr=args.q_lr, eps=1e-4)
-        a_optimizer = optim.Adam([log_alpha], lr=args.q_lr)
+        a_optimizer = optim.Adam([log_alpha], lr=args.q_lr, eps=1e-4)
     else:
         alpha = args.alpha
 
@@ -319,7 +186,9 @@ if __name__ == "__main__":
             )
         else:
             seq_lengths = torch.LongTensor([1])
-            actions, _, _, hidden_out = actor.get_action(torch.unsqueeze(torch.Tensor(obs).to(device), 0), seq_lengths, hidden_in)
+            actions, _, _, hidden_out = actor.get_action(
+                torch.unsqueeze(torch.Tensor(obs).to(device), 0), seq_lengths, hidden_in
+            )
             actions = torch.squeeze(actions, 0).detach().cpu().numpy()
             hidden_in = hidden_out
 
@@ -354,7 +223,14 @@ if __name__ == "__main__":
         # ALGO LOGIC: training.
         if global_step > args.learning_starts:
             # sample data from replay buffer
-            observations, actions, next_observations, dones, rewards, seq_lengths = rb.sample_history(args.batch_size, history_length=4)
+            (
+                observations,
+                actions,
+                next_observations,
+                dones,
+                rewards,
+                seq_lengths,
+            ) = rb.sample_history(args.batch_size, history_length=4)
             # ---------- update critic ---------- #
             # no grad because target networks are updated separately (pg. 6 of
             # updated SAC paper)
@@ -367,9 +243,13 @@ if __name__ == "__main__":
                 qf2_next_target = qf2_target(next_observations, seq_lengths)
                 min_qf_next_target = torch.min(qf1_next_target, qf2_next_target)
                 # calculate eq. 3 in updated SAC paper
-                qf_next_target = next_state_action_probs * (min_qf_next_target - alpha * next_state_log_pis)
+                qf_next_target = next_state_action_probs * (
+                    min_qf_next_target - alpha * next_state_log_pis
+                )
                 # calculate eq. 2 in updated SAC paper
-                next_q_value = rewards + ((1 - dones) * args.gamma * qf_next_target.sum(dim=2).unsqueeze(-1))
+                next_q_value = rewards + (
+                    (1 - dones) * args.gamma * qf_next_target.sum(dim=2).unsqueeze(-1)
+                )
 
             # calculate eq. 5 in updated SAC paper
             qf1_a_values = qf1(observations, seq_lengths).gather(2, actions)
@@ -380,13 +260,15 @@ if __name__ == "__main__":
             q_loss_mask_nonzero_elements = torch.sum(q_loss_mask).to(device)
             qf1_loss = (
                 torch.sum(
-                    F.mse_loss(qf1_a_values, next_q_value, reduction="none") * q_loss_mask
+                    F.mse_loss(qf1_a_values, next_q_value, reduction="none")
+                    * q_loss_mask
                 )
                 / q_loss_mask_nonzero_elements
             )
             qf2_loss = (
                 torch.sum(
-                    F.mse_loss(qf2_a_values, next_q_value, reduction="none") * q_loss_mask
+                    F.mse_loss(qf2_a_values, next_q_value, reduction="none")
+                    * q_loss_mask
                 )
                 / q_loss_mask_nonzero_elements
             )
@@ -402,15 +284,22 @@ if __name__ == "__main__":
                 for _ in range(
                     args.policy_frequency
                 ):  # compensate for the delay by doing 'actor_update_interval' instead of 1
-                    _, state_action_probs, state_action_log_pis, _ = actor.get_action(observations, seq_lengths)
+                    _, state_action_probs, state_action_log_pis, _ = actor.get_action(
+                        observations, seq_lengths
+                    )
                     qf1_pi = qf1(observations, seq_lengths)
                     qf2_pi = qf2(observations, seq_lengths)
                     min_qf_pi = torch.min(qf1_pi, qf2_pi)
                     # calculate eq. 7 in updated SAC paper
                     actor_loss_mask = torch.repeat_interleave(q_loss_mask, 2, 2)
                     actor_loss_mask_nonzero_elements = torch.sum(actor_loss_mask)
-                    actor_loss = state_action_probs * ((alpha * state_action_log_pis) - min_qf_pi)
-                    actor_loss = torch.sum(actor_loss * actor_loss_mask) / actor_loss_mask_nonzero_elements
+                    actor_loss = state_action_probs * (
+                        (alpha * state_action_log_pis) - min_qf_pi
+                    )
+                    actor_loss = (
+                        torch.sum(actor_loss * actor_loss_mask)
+                        / actor_loss_mask_nonzero_elements
+                    )
 
                     # calculate eq. 9 in updated SAC paper
                     actor_optimizer.zero_grad()
@@ -420,10 +309,20 @@ if __name__ == "__main__":
                     # ---------- update alpha ---------- #
                     if args.autotune:
                         with torch.no_grad():
-                            _, state_action_probs, state_action_log_pis, _ = actor.get_action(observations, seq_lengths)
+                            (
+                                _,
+                                state_action_probs,
+                                state_action_log_pis,
+                                _,
+                            ) = actor.get_action(observations, seq_lengths)
                         # calculate eq. 18 in updated SAC paper
-                        alpha_loss = state_action_probs * (-log_alpha * (state_action_log_pis + target_entropy))
-                        alpha_loss = torch.sum(alpha_loss * actor_loss_mask) / actor_loss_mask_nonzero_elements
+                        alpha_loss = state_action_probs * (
+                            -log_alpha * (state_action_log_pis + target_entropy)
+                        )
+                        alpha_loss = (
+                            torch.sum(alpha_loss * actor_loss_mask)
+                            / actor_loss_mask_nonzero_elements
+                        )
 
                         # calculate gradient of eq. 18
                         a_optimizer.zero_grad()
@@ -438,7 +337,7 @@ if __name__ == "__main__":
                 ):
                     target_param.data.copy_(
                         args.tau * param.data + (1 - args.tau) * target_param.data
-                    ) # "update target network weights" line in page 8, algorithm 1,
+                    )  # "update target network weights" line in page 8, algorithm 1,
                     # in updated SAC paper
                 for param, target_param in zip(
                     qf2.parameters(), qf2_target.parameters()

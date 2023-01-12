@@ -8,16 +8,14 @@ from distutils.util import strtobool
 import gym
 import numpy as np
 import torch
-import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
-from torch.distributions import Categorical
-from torch.nn.utils import clip_grad_norm_
-from torch.utils.tensorboard import SummaryWriter
-from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
-
-from utils import ReplayBuffer
 from gym_pomdps.wrappers.resetobservation import ResetObservationWrapper
+from torch.utils.tensorboard import SummaryWriter
+
+from models import (RecurrentDiscreteActorDiscreteObs,
+                    RecurrentDiscreteCriticDiscreteObs)
+from utils import ReplayBuffer
 
 
 def parse_args():
@@ -91,8 +89,11 @@ def make_env(env_id, seed, idx, capture_video, run_name):
     env : gym environment
         Gym environment to be used for learning.
     """
+
     def thunk():
-        env = gym.wrappers.TimeLimit(ResetObservationWrapper(gym.make(env_id)), max_episode_steps=50)
+        env = gym.wrappers.TimeLimit(
+            ResetObservationWrapper(gym.make(env_id)), max_episode_steps=50
+        )
         env = gym.wrappers.RecordEpisodeStatistics(env)
         if capture_video:
             if idx == 0:
@@ -104,137 +105,15 @@ def make_env(env_id, seed, idx, capture_video, run_name):
 
     return thunk
 
-# ALGO LOGIC: initialize agent here:
-class SoftQNetwork(nn.Module):
-    """Critic (Value) network."""
-    def __init__(self, env):
-        """Initialize the critic model.
 
-        Parameters
-        ----------
-        env : gym environment
-            Gym environment being used for learning.
-        """
-        super().__init__()
-        self.embedding = nn.Embedding(env.single_observation_space.n, 256)
-        self.lstm1 = nn.LSTM(256, 256)
-        self.fc2 = nn.Linear(256, 256)
-        self.fc3 = nn.Linear(256, env.single_action_space.n)
-
-    def forward(self, x, seq_lengths):
-        """
-        Calculates Q-values for each state-action.
-
-        Parameters
-        ----------
-        x : tensor
-            State or observation.
-
-        Returns
-        -------
-        q_values : tensor
-            Q-values for all actions possible with input state.
-        """
-        # Embedding layer
-        x = self.embedding(x)
-
-        # Padded LSTM layer
-        x = pack_padded_sequence(x, seq_lengths, enforce_sorted=False)
-        self.lstm1.flatten_parameters()
-        x, _ = self.lstm1(x)
-        x, x_unpacked_len = pad_packed_sequence(x)
-
-        # Remaining layers
-        x = F.relu(self.fc2(x))
-        q_values = self.fc3(x)
-        return q_values
-
-
-class Actor(nn.Module):
-    """Actor (Policy) network."""
-    def __init__(self, env):
-        """Initialize the actor model.
-
-        Parameters
-        ----------
-        env : gym environment
-            Gym environment being used for learning.
-        """
-        super().__init__()
-        self.embedding = nn.Embedding(env.single_observation_space.n, 256)
-        self.lstm1 = nn.LSTM(256, 256)
-        self.fc2 = nn.Linear(256, 256)
-        self.fc_out = nn.Linear(256, env.single_action_space.n)
-        self.softmax = nn.Softmax(dim=-1)
-
-
-    def forward(self, x, seq_lengths, in_hidden=None):
-        """
-        Calculates probabilities for taking each action given a state.
-
-        Parameters
-        ----------
-        x : tensor
-            State or observation.
-
-        Returns
-        -------
-        action_probs : tensor
-            Probabilities for all actions possible with input state.
-        """
-        # Embedding layer
-        x = self.embedding(x)
-
-        # Padded LSTM layer
-        x = pack_padded_sequence(x, seq_lengths, enforce_sorted=False)
-        self.lstm1.flatten_parameters()
-        x, out_hidden = self.lstm1(x, in_hidden)
-        x, x_unpacked_len = pad_packed_sequence(x)
-
-        # Remaining layers
-        x = F.relu(self.fc2(x))
-        action_logits = self.fc_out(x)
-        action_probs = self.softmax(action_logits)
-
-        return action_probs, out_hidden
-
-    def get_action(self, x, seq_lengths, in_hidden=None, epsilon=1e-6):
-        """
-        Calculates actions by sampling from action distribution.
-
-        Parameters
-        ----------
-        x : tensor
-            Action probabilities.
-        epsilon : float
-            Used to ensure no zero probability values.
-
-        Returns
-        -------
-        action : tensor
-            Sampled action from action distribution.
-        action_probs : tensor
-            Probabilities for all actions possible with input state.
-        log_action_probs : tensor
-            Log of action probabilities, used for entropy.
-        """
-        action_probs, out_hidden = self.forward(x, seq_lengths, in_hidden)
-
-        dist = Categorical(action_probs)
-        action = dist.sample().to(x.device)
-
-        # Have to deal with situation of 0.0 probabilities because we can't do log 0
-        z = action_probs == 0.0
-        z = z.float() * 1e-8
-        log_action_probabilities = torch.log(action_probs + z)
-        return action, action_probs, log_action_probabilities, out_hidden
-
-def eval_policy(actor, env_name, seed, seed_offset, global_step, capture_video, run_name, writer):
+def eval_policy(
+    actor, env_name, seed, seed_offset, global_step, capture_video, run_name, writer
+):
     with torch.no_grad():
         # Initialization
         run_name_full = run_name + "__eval__" + str(global_step)
         envs = gym.vector.SyncVectorEnv(
-            [make_env(env_name, seed+seed_offset, 0, capture_video, run_name_full)]
+            [make_env(env_name, seed + seed_offset, 0, capture_video, run_name_full)]
         )
 
         done = False
@@ -246,14 +125,20 @@ def eval_policy(actor, env_name, seed, seed_offset, global_step, capture_video, 
         while not done:
             # Get action
             seq_lengths = torch.LongTensor([1])
-            actions, _, _, hidden_out = actor.get_action(torch.unsqueeze(torch.tensor(obs).to(device), 0), seq_lengths, hidden_in)
+            actions, _, _, hidden_out = actor.get_action(
+                torch.unsqueeze(torch.tensor(obs).to(device), 0), seq_lengths, hidden_in
+            )
             actions = torch.squeeze(actions, 0).detach().cpu().numpy()
             hidden_in = hidden_out
 
             # Step through environment
             next_obs, rewards, dones, infos = envs.step(actions)
 
-            print("Obs: {}, Action: {}, Next Obs: {}, Reward: {}, Dones: {}".format(obs, actions, next_obs, rewards, dones))
+            print(
+                "Obs: {}, Action: {}, Next Obs: {}, Reward: {}, Dones: {}".format(
+                    obs, actions, next_obs, rewards, dones
+                )
+            )
 
             # Plotting returns
             for info in infos:
@@ -319,11 +204,11 @@ if __name__ == "__main__":
     ), "only discrete action space is supported"
 
     # Initialize models and optimizers
-    actor = Actor(envs).to(device)
-    qf1 = SoftQNetwork(envs).to(device)
-    qf2 = SoftQNetwork(envs).to(device)
-    qf1_target = SoftQNetwork(envs).to(device)
-    qf2_target = SoftQNetwork(envs).to(device)
+    actor = RecurrentDiscreteActorDiscreteObs(envs).to(device)
+    qf1 = RecurrentDiscreteCriticDiscreteObs(envs).to(device)
+    qf2 = RecurrentDiscreteCriticDiscreteObs(envs).to(device)
+    qf1_target = RecurrentDiscreteCriticDiscreteObs(envs).to(device)
+    qf2_target = RecurrentDiscreteCriticDiscreteObs(envs).to(device)
     qf1_target.load_state_dict(qf1.state_dict())
     qf2_target.load_state_dict(qf2.state_dict())
     q_optimizer = optim.Adam(
@@ -358,13 +243,27 @@ if __name__ == "__main__":
         device,
         handle_timeout_termination=True,
     )
-    rb.add_dataset(dataset_obs, dataset_next_obs, dataset_actions, dataset_rewards, dataset_dones, dataset_timeouts)
+    rb.add_dataset(
+        dataset_obs,
+        dataset_next_obs,
+        dataset_actions,
+        dataset_rewards,
+        dataset_dones,
+        dataset_timeouts,
+    )
     start_time = time.time()
 
     # ALGO LOGIC: training and evaluation
     for global_step in range(args.total_timesteps):
         # sample data from replay buffer
-        observations, actions, next_observations, dones, rewards, seq_lengths = rb.sample_history(args.batch_size)
+        (
+            observations,
+            actions,
+            next_observations,
+            dones,
+            rewards,
+            seq_lengths,
+        ) = rb.sample_history(args.batch_size)
         observations = observations.squeeze(2).long()
         next_observations = next_observations.squeeze(2).long()
         # ---------- update critic ---------- #
@@ -379,9 +278,13 @@ if __name__ == "__main__":
             qf2_next_target = qf2_target(next_observations, seq_lengths)
             min_qf_next_target = torch.min(qf1_next_target, qf2_next_target)
             # calculate eq. 3 in updated SAC paper
-            qf_next_target = next_state_action_probs * (min_qf_next_target - alpha * next_state_log_pis)
+            qf_next_target = next_state_action_probs * (
+                min_qf_next_target - alpha * next_state_log_pis
+            )
             # calculate eq. 2 in updated SAC paper
-            next_q_value = rewards + ((1 - dones) * args.gamma * qf_next_target.sum(dim=2).unsqueeze(-1))
+            next_q_value = rewards + (
+                (1 - dones) * args.gamma * qf_next_target.sum(dim=2).unsqueeze(-1)
+            )
 
         # calculate eq. 5 in updated SAC paper
         qf1_a_values = qf1(observations, seq_lengths).gather(2, actions)
@@ -416,15 +319,22 @@ if __name__ == "__main__":
             for _ in range(
                 args.policy_frequency
             ):  # compensate for the delay by doing 'actor_update_interval' instead of 1
-                _, state_action_probs, state_action_log_pis, _ = actor.get_action(observations, seq_lengths)
+                _, state_action_probs, state_action_log_pis, _ = actor.get_action(
+                    observations, seq_lengths
+                )
                 qf1_pi = qf1(observations, seq_lengths)
                 qf2_pi = qf2(observations, seq_lengths)
                 min_qf_pi = torch.min(qf1_pi, qf2_pi)
                 # calculate eq. 7 in updated SAC paper
                 actor_loss_mask = torch.repeat_interleave(q_loss_mask, 2, 2)
                 actor_loss_mask_nonzero_elements = torch.sum(actor_loss_mask)
-                actor_loss = state_action_probs * ((alpha * state_action_log_pis) - min_qf_pi)
-                actor_loss = torch.sum(actor_loss * actor_loss_mask) / actor_loss_mask_nonzero_elements
+                actor_loss = state_action_probs * (
+                    (alpha * state_action_log_pis) - min_qf_pi
+                )
+                actor_loss = (
+                    torch.sum(actor_loss * actor_loss_mask)
+                    / actor_loss_mask_nonzero_elements
+                )
 
                 # calculate eq. 9 in updated SAC paper
                 actor_optimizer.zero_grad()
@@ -434,10 +344,20 @@ if __name__ == "__main__":
                 # ---------- update alpha ---------- #
                 if args.autotune:
                     with torch.no_grad():
-                        _, state_action_probs, state_action_log_pis, _ = actor.get_action(observations, seq_lengths)
+                        (
+                            _,
+                            state_action_probs,
+                            state_action_log_pis,
+                            _,
+                        ) = actor.get_action(observations, seq_lengths)
                     # calculate eq. 18 in updated SAC paper
-                    alpha_loss = state_action_probs * (-log_alpha * (state_action_log_pis + target_entropy))
-                    alpha_loss = torch.sum(alpha_loss * actor_loss_mask) / actor_loss_mask_nonzero_elements
+                    alpha_loss = state_action_probs * (
+                        -log_alpha * (state_action_log_pis + target_entropy)
+                    )
+                    alpha_loss = (
+                        torch.sum(alpha_loss * actor_loss_mask)
+                        / actor_loss_mask_nonzero_elements
+                    )
 
                     # calculate gradient of eq. 18
                     a_optimizer.zero_grad()
@@ -447,16 +367,12 @@ if __name__ == "__main__":
 
         # update the target networks
         if global_step % args.target_network_frequency == 0:
-            for param, target_param in zip(
-                qf1.parameters(), qf1_target.parameters()
-            ):
+            for param, target_param in zip(qf1.parameters(), qf1_target.parameters()):
                 target_param.data.copy_(
                     args.tau * param.data + (1 - args.tau) * target_param.data
-                ) # "update target network weights" line in page 8, algorithm 1,
+                )  # "update target network weights" line in page 8, algorithm 1,
                 # in updated SAC paper
-            for param, target_param in zip(
-                qf2.parameters(), qf2_target.parameters()
-            ):
+            for param, target_param in zip(qf2.parameters(), qf2_target.parameters()):
                 target_param.data.copy_(
                     args.tau * param.data + (1 - args.tau) * target_param.data
                 )
@@ -480,12 +396,19 @@ if __name__ == "__main__":
                 global_step,
             )
             if args.autotune:
-                writer.add_scalar(
-                    "losses/alpha_loss", alpha_loss.item(), global_step
-                )
+                writer.add_scalar("losses/alpha_loss", alpha_loss.item(), global_step)
 
         if (global_step + 1) % args.eval_freq == 0 or global_step == 0:
-            eval_policy(actor, args.env_id, args.seed, 100, global_step, args.capture_video, run_name, writer)
+            eval_policy(
+                actor,
+                args.env_id,
+                args.seed,
+                100,
+                global_step,
+                args.capture_video,
+                run_name,
+                writer,
+            )
 
     envs.close()
     writer.close()
