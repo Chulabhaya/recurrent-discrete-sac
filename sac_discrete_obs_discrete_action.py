@@ -14,7 +14,7 @@ from gym_pomdps.wrappers.resetobservation import ResetObservationWrapper
 
 import wandb
 from models import DiscreteActorDiscreteObs, DiscreteCriticDiscreteObs
-from utils import ReplayBuffer
+from replay_buffer import ReplayBuffer
 
 
 def parse_args():

@@ -15,7 +15,7 @@ from torch.utils.tensorboard import SummaryWriter
 
 from models import (RecurrentDiscreteActorDiscreteObs,
                     RecurrentDiscreteCriticDiscreteObs)
-from utils import ReplayBuffer
+from replay_buffer import ReplayBuffer
 
 
 def parse_args():

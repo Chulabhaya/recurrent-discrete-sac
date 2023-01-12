@@ -10,10 +10,10 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 import torch.optim as optim
-from stable_baselines3.common.buffers import ReplayBuffer
 from torch.utils.tensorboard import SummaryWriter
 
 from models import ContinuousActor, ContinuousCritic
+from replay_buffer import ReplayBuffer
 
 
 def parse_args():

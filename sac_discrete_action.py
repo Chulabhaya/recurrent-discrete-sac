@@ -14,7 +14,7 @@ import torch.optim as optim
 from torch.utils.tensorboard import SummaryWriter
 
 from models import DiscreteActor, DiscreteCritic
-from utils import ReplayBuffer
+from replay_buffer import ReplayBuffer
 
 
 def parse_args():
