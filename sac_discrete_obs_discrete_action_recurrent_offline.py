@@ -10,12 +10,12 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 import torch.optim as optim
-from gym_pomdps.wrappers.resetobservation import ResetObservationWrapper
 from torch.utils.tensorboard import SummaryWriter
 
 from models import (RecurrentDiscreteActorDiscreteObs,
                     RecurrentDiscreteCriticDiscreteObs)
 from replay_buffer import ReplayBuffer
+from utils import make_env_discrete_pomdp
 
 
 def parse_args():
@@ -68,44 +68,6 @@ def parse_args():
     return args
 
 
-def make_env(env_id, seed, idx, capture_video, run_name):
-    """Generates seeded environment.
-
-    Parameters
-    ----------
-    env_id : string
-        Name of Gym environment.
-    seed : int
-        Seed.
-    idx : int
-        Whether to record videos or not.
-    capture_video : boolean
-        Whether to record videos or not.
-    run_name : string
-        Name of run to be used for video.
-
-    Returns
-    -------
-    env : gym environment
-        Gym environment to be used for learning.
-    """
-
-    def thunk():
-        env = gym.wrappers.TimeLimit(
-            ResetObservationWrapper(gym.make(env_id)), max_episode_steps=50
-        )
-        env = gym.wrappers.RecordEpisodeStatistics(env)
-        if capture_video:
-            if idx == 0:
-                env = gym.wrappers.RecordVideo(env, f"videos/{run_name}")
-        env.seed(seed)
-        env.action_space.seed(seed)
-        env.observation_space.seed(seed)
-        return env
-
-    return thunk
-
-
 def eval_policy(
     actor, env_name, seed, seed_offset, global_step, capture_video, run_name, writer
 ):
@@ -113,7 +75,7 @@ def eval_policy(
         # Initialization
         run_name_full = run_name + "__eval__" + str(global_step)
         envs = gym.vector.SyncVectorEnv(
-            [make_env(env_name, seed + seed_offset, 0, capture_video, run_name_full)]
+            [make_env_discrete_pomdp(env_name, seed + seed_offset, 0, capture_video, run_name_full)]
         )
 
         done = False
@@ -197,7 +159,7 @@ if __name__ == "__main__":
 
     # Env setup
     envs = gym.vector.SyncVectorEnv(
-        [make_env(args.env_id, args.seed, 0, args.capture_video, run_name)]
+        [make_env_discrete_pomdp(args.env_id, args.seed, 0, args.capture_video, run_name)]
     )
     assert isinstance(
         envs.single_action_space, gym.spaces.Discrete

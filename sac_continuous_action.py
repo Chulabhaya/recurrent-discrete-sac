@@ -14,6 +14,7 @@ from torch.utils.tensorboard import SummaryWriter
 
 from models import ContinuousActor, ContinuousCritic
 from replay_buffer import ReplayBuffer
+from utils import make_env
 
 
 def parse_args():
@@ -70,21 +71,6 @@ def parse_args():
     args = parser.parse_args()
     # fmt: on
     return args
-
-
-def make_env(env_id, seed, idx, capture_video, run_name):
-    def thunk():
-        env = gym.make(env_id)
-        env = gym.wrappers.RecordEpisodeStatistics(env)
-        if capture_video:
-            if idx == 0:
-                env = gym.wrappers.RecordVideo(env, f"videos/{run_name}")
-        env.seed(seed)
-        env.action_space.seed(seed)
-        env.observation_space.seed(seed)
-        return env
-
-    return thunk
 
 
 if __name__ == "__main__":

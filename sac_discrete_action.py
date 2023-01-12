@@ -8,13 +8,13 @@ from distutils.util import strtobool
 import gym
 import numpy as np
 import torch
-import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 from torch.utils.tensorboard import SummaryWriter
 
 from models import DiscreteActor, DiscreteCritic
 from replay_buffer import ReplayBuffer
+from utils import make_env
 
 
 def parse_args():
@@ -67,42 +67,6 @@ def parse_args():
     args = parser.parse_args()
     # fmt: on
     return args
-
-
-def make_env(env_id, seed, idx, capture_video, run_name):
-    """Generates seeded environment.
-
-    Parameters
-    ----------
-    env_id : string
-        Name of Gym environment.
-    seed : int
-        Seed.
-    idx : int
-        Whether to record videos or not.
-    capture_video : boolean
-        Whether to record videos or not.
-    run_name : string
-        Name of run to be used for video.
-
-    Returns
-    -------
-    env : gym environment
-        Gym environment to be used for learning.
-    """
-
-    def thunk():
-        env = gym.make(env_id)
-        env = gym.wrappers.RecordEpisodeStatistics(env)
-        if capture_video:
-            if idx == 0:
-                env = gym.wrappers.RecordVideo(env, f"videos/{run_name}")
-        env.seed(seed)
-        env.action_space.seed(seed)
-        env.observation_space.seed(seed)
-        return env
-
-    return thunk
 
 
 if __name__ == "__main__":
