@@ -10,12 +10,12 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 import torch.optim as optim
-from torch.utils.tensorboard import SummaryWriter
 
+import wandb
 from models import (RecurrentDiscreteActorDiscreteObs,
                     RecurrentDiscreteCriticDiscreteObs)
 from replay_buffer import ReplayBuffer
-from utils import make_env_discrete_pomdp
+from utils import make_env_gym_pomdp
 
 
 def parse_args():
@@ -29,12 +29,8 @@ def parse_args():
         help="if toggled, `torch.backends.cudnn.deterministic=False`")
     parser.add_argument("--cuda", type=lambda x: bool(strtobool(x)), default=True, nargs="?", const=True,
         help="if toggled, cuda will be enabled by default")
-    parser.add_argument("--track", type=lambda x: bool(strtobool(x)), default=False, nargs="?", const=True,
-        help="if toggled, this experiment will be tracked with Weights and Biases")
-    parser.add_argument("--wandb-project-name", type=str, default="cleanRL",
+    parser.add_argument("--wandb-project-name", type=str, default="sac-discrete-obs-discrete-action-recurrent-offline",
         help="the wandb's project name")
-    parser.add_argument("--wandb-entity", type=str, default=None,
-        help="the entity (team) of wandb's project")
     parser.add_argument("--capture-video", type=lambda x: bool(strtobool(x)), default=False, nargs="?", const=True,
         help="whether to capture videos of the agent performances (check out `videos` folder)")
 
@@ -69,18 +65,21 @@ def parse_args():
 
 
 def eval_policy(
-    actor, env_name, seed, seed_offset, global_step, capture_video, run_name, writer
+    actor, env_name, seed, seed_offset, global_step, capture_video, run_name, data_log
 ):
     with torch.no_grad():
         # Initialization
         run_name_full = run_name + "__eval__" + str(global_step)
         envs = gym.vector.SyncVectorEnv(
-            [make_env_discrete_pomdp(env_name, seed + seed_offset, 0, capture_video, run_name_full)]
+            [make_env_gym_pomdp(env_name, seed + seed_offset, 0, capture_video, run_name_full)]
         )
 
         done = False
         obs = envs.reset()
         hidden_in = None
+
+        # TODO: Run a series of 10 evaluations each time this function is called and
+        # average the results for returning back
 
         # Start evaluation
         timestep = 0
@@ -108,12 +107,8 @@ def eval_policy(
                     print(
                         f"global_step={global_step}, eval_episodic_return={info['episode']['r']}"
                     )
-                    writer.add_scalar(
-                        "charts/eval_episodic_return", info["episode"]["r"], global_step
-                    )
-                    writer.add_scalar(
-                        "charts/eval_episodic_length", info["episode"]["l"], global_step
-                    )
+                    data_log["misc/eval_episodic_return"] = info["episode"]["r"]
+                    data_log["misc/eval_episodic_length"] = info["episode"]["r"]
                     break
 
             # Check for termination
@@ -129,23 +124,14 @@ def eval_policy(
 if __name__ == "__main__":
     args = parse_args()
     run_name = f"{args.env_id}__{args.exp_name}__{args.seed}__{int(time.time())}"
-    if args.track:
-        import wandb
 
-        wandb.init(
-            project=args.wandb_project_name,
-            entity=args.wandb_entity,
-            sync_tensorboard=True,
-            config=vars(args),
-            name=run_name,
-            monitor_gym=True,
-            save_code=True,
-        )
-    writer = SummaryWriter(f"runs/{run_name}")
-    writer.add_text(
-        "hyperparameters",
-        "|param|value|\n|-|-|\n%s"
-        % ("\n".join([f"|{key}|{value}|" for key, value in vars(args).items()])),
+    wandb.init(
+        project=args.wandb_project_name,
+        sync_tensorboard=True,
+        config=vars(args),
+        name=run_name,
+        monitor_gym=True,
+        save_code=True,
     )
 
     # TRY NOT TO MODIFY: seeding
@@ -159,7 +145,7 @@ if __name__ == "__main__":
 
     # Env setup
     envs = gym.vector.SyncVectorEnv(
-        [make_env_discrete_pomdp(args.env_id, args.seed, 0, args.capture_video, run_name)]
+        [make_env_gym_pomdp(args.env_id, args.seed, 0, args.capture_video, run_name)]
     )
     assert isinstance(
         envs.single_action_space, gym.spaces.Discrete
@@ -217,6 +203,9 @@ if __name__ == "__main__":
 
     # ALGO LOGIC: training and evaluation
     for global_step in range(args.total_timesteps):
+        # Store values for data logging for each global step
+        data_log = {}
+
         # sample data from replay buffer
         (
             observations,
@@ -340,25 +329,19 @@ if __name__ == "__main__":
                 )
 
         if global_step % 100 == 0:
-            writer.add_scalar(
-                "losses/qf1_values", qf1_a_values.mean().item(), global_step
+            data_log["losses/qf1_values"] = qf1_a_values.mean().item()
+            data_log["losses/qf2_values"] = qf2_a_values.mean().item()
+            data_log["losses/qf1_loss"] = qf1_loss.item()
+            data_log["losses/qf2_loss"] = qf2_loss.item()
+            data_log["losses/qf_loss"] = qf_loss.item() / 2.0
+            data_log["losses/actor_loss"] = actor_loss.item()
+            data_log["losses/alpha"] = alpha
+            data_log["misc/steps_per_second"] = int(
+                global_step / (time.time() - start_time)
             )
-            writer.add_scalar(
-                "losses/qf2_values", qf2_a_values.mean().item(), global_step
-            )
-            writer.add_scalar("losses/qf1_loss", qf1_loss.item(), global_step)
-            writer.add_scalar("losses/qf2_loss", qf2_loss.item(), global_step)
-            writer.add_scalar("losses/qf_loss", qf_loss.item() / 2.0, global_step)
-            writer.add_scalar("losses/actor_loss", actor_loss.item(), global_step)
-            writer.add_scalar("losses/alpha", alpha, global_step)
             print("SPS:", int(global_step / (time.time() - start_time)))
-            writer.add_scalar(
-                "charts/SPS",
-                int(global_step / (time.time() - start_time)),
-                global_step,
-            )
             if args.autotune:
-                writer.add_scalar("losses/alpha_loss", alpha_loss.item(), global_step)
+                data_log["losses/alpha_loss"] = alpha_loss.item()
 
         if (global_step + 1) % args.eval_freq == 0 or global_step == 0:
             eval_policy(
@@ -369,8 +352,10 @@ if __name__ == "__main__":
                 global_step,
                 args.capture_video,
                 run_name,
-                writer,
+                data_log,
             )
 
+        data_log["misc/global_step"] = global_step
+        wandb.log(data_log)
+
     envs.close()
-    writer.close()

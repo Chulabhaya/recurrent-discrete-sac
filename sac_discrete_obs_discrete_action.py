@@ -14,7 +14,7 @@ import torch.optim as optim
 import wandb
 from models import DiscreteActorDiscreteObs, DiscreteCriticDiscreteObs
 from replay_buffer import ReplayBuffer
-from utils import make_env_discrete_pomdp
+from utils import make_env_gym_pomdp
 
 
 def parse_args():
@@ -28,7 +28,7 @@ def parse_args():
         help="if toggled, `torch.backends.cudnn.deterministic=False`")
     parser.add_argument("--cuda", type=lambda x: bool(strtobool(x)), default=True, nargs="?", const=True,
         help="if toggled, cuda will be enabled by default")
-    parser.add_argument("--wandb-project-name", type=str, default="sac-discrete-obs-discrete-action2",
+    parser.add_argument("--wandb-project-name", type=str, default="sac-discrete-obs-discrete-action",
         help="the wandb's project name")
     parser.add_argument("--capture-video", type=lambda x: bool(strtobool(x)), default=False, nargs="?", const=True,
         help="whether to capture videos of the agent performances (check out `videos` folder)")
@@ -90,7 +90,7 @@ if __name__ == "__main__":
 
     # Env setup
     envs = gym.vector.SyncVectorEnv(
-        [make_env_discrete_pomdp(args.env_id, args.seed, 0, args.capture_video, run_name)]
+        [make_env_gym_pomdp(args.env_id, args.seed, 0, args.capture_video, run_name)]
     )
     assert isinstance(
         envs.single_action_space, gym.spaces.Discrete
@@ -155,10 +155,8 @@ if __name__ == "__main__":
                 print(
                     f"global_step={global_step}, episodic_return={info['episode']['r']}"
                 )
-
                 data_log["misc/episodic_return"] = info["episode"]["r"]
                 data_log["misc/episodic_length"] = info["episode"]["r"]
-
                 break
 
         # TRY NOT TO MODIFY: save data to reply buffer; handle `terminal_observation`
@@ -284,7 +282,6 @@ if __name__ == "__main__":
                 data_log["misc/steps_per_second"] = int(
                     global_step / (time.time() - start_time)
                 )
-
                 print("SPS:", int(global_step / (time.time() - start_time)))
                 if args.autotune:
                     data_log["losses/alpha_loss"] = alpha_loss.item()

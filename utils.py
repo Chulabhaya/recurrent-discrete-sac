@@ -38,7 +38,7 @@ def make_env(env_id, seed, idx, capture_video, run_name):
     return thunk
 
 
-def make_env_discrete_pomdp(env_id, seed, idx, capture_video, run_name):
+def make_env_gym_pomdp(env_id, seed, idx, capture_video, run_name, max_episode_len):
     """Generates seeded environment for discrete Gym POMDPs that need
     additional env wrappers.
 
@@ -63,7 +63,7 @@ def make_env_discrete_pomdp(env_id, seed, idx, capture_video, run_name):
 
     def thunk():
         env = gym.wrappers.TimeLimit(
-            ResetObservationWrapper(gym.make(env_id)), max_episode_steps=50
+            ResetObservationWrapper(gym.make(env_id)), max_episode_steps=max_episode_len
         )
         env = gym.wrappers.RecordEpisodeStatistics(env)
         if capture_video:
