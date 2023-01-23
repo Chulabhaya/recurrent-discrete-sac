@@ -14,7 +14,7 @@ import torch.optim as optim
 import wandb
 from models import RecurrentDiscreteActorDiscreteObs, RecurrentDiscreteCriticDiscreteObs
 from replay_buffer import ReplayBuffer
-from utils import make_env_gym_pomdp, save
+from utils import make_env_gym_pomdp, save, set_seed
 
 
 def parse_args():
@@ -24,8 +24,6 @@ def parse_args():
         help="the name of this experiment")
     parser.add_argument("--seed", type=int, default=2,
         help="seed of the experiment")
-    parser.add_argument("--torch-deterministic", type=lambda x: bool(strtobool(x)), default=True, nargs="?", const=True,
-        help="if toggled, `torch.backends.cudnn.deterministic=False`")
     parser.add_argument("--cuda", type=lambda x: bool(strtobool(x)), default=True, nargs="?", const=True,
         help="if toggled, cuda will be enabled by default")
     parser.add_argument("--wandb-project-name", type=str, default="sac-discrete-obs-discrete-action-recurrent",
@@ -68,7 +66,7 @@ def parse_args():
         help="how often to save checkpoints during training (in timesteps)")
     parser.add_argument("--resume", type=lambda x: bool(strtobool(x)), default=True, nargs="?", const=True,
         help="whether to resume training from a checkpoint")
-    parser.add_argument("--checkpoint-path", type=str, default="trained_models/POMDP-heavenhell_1-episodic-v0__sac_discrete_obs_discrete_action_recurrent__2__1674418737_2djuqb9i/global_step_5000.pth",
+    parser.add_argument("--checkpoint-path", type=str, default="trained_models/POMDP-heavenhell_1-episodic-v0__sac_discrete_obs_discrete_action_recurrent__2__1674500324_1j35879b/global_step_5000.pth",
         help="path to checkpoint to resume training from")
     parser.add_argument("--run-id", type=str, default=None,
         help="wandb unique run id for resuming")
@@ -92,20 +90,30 @@ if __name__ == "__main__":
             config=vars(args),
             name=run_name,
             resume="must",
+            save_code=True,
+            settings=wandb.Settings(code_dir="."),
+            # mode="offline",
         )
     else:
         wandb.init(
-            id=run_id, project=args.wandb_project_name, config=vars(args), name=run_name
+            id=run_id,
+            project=args.wandb_project_name,
+            config=vars(args),
+            name=run_name,
+            save_code=True,
+            settings=wandb.Settings(code_dir="."),
+            # mode="offline",
         )
 
-    # TRY NOT TO MODIFY: seeding
-    random.seed(args.seed)
-    np.random.seed(args.seed)
-    torch.manual_seed(args.seed)
-    torch.backends.cudnn.deterministic = args.torch_deterministic
+    # Load checkpoint if resuming
+    if args.resume:
+        checkpoint = torch.load(args.checkpoint_path)
 
     # Set training device
     device = torch.device("cuda" if torch.cuda.is_available() and args.cuda else "cpu")
+
+    # TRY NOT TO MODIFY: seeding
+    set_seed(args.seed)
 
     # Env setup
     envs = gym.vector.SyncVectorEnv(
@@ -137,12 +145,8 @@ if __name__ == "__main__":
     )
     actor_optimizer = optim.Adam(list(actor.parameters()), lr=args.policy_lr)
 
-    # If resuming training, load from checkpoints
+    # If resuming training, load models and optimizers
     if args.resume:
-        print(
-            "Resuming training from the following checkpoint: " + args.checkpoint_path
-        )
-        checkpoint = torch.load(args.checkpoint_path)
         actor.load_state_dict(checkpoint["model_state_dict"]["actor_state_dict"])
         qf1.load_state_dict(checkpoint["model_state_dict"]["qf1_state_dict"])
         qf2.load_state_dict(checkpoint["model_state_dict"]["qf2_state_dict"])
@@ -162,7 +166,7 @@ if __name__ == "__main__":
         target_entropy = -0.3 * torch.log(1 / torch.tensor(envs.single_action_space.n))
         log_alpha = torch.zeros(1, requires_grad=True, device=device)
         a_optimizer = optim.Adam([log_alpha], lr=args.q_lr, eps=1e-4)
-
+        # If resuming, load optimizer
         if args.resume:
             a_optimizer.load_state_dict(
                 checkpoint["optimizer_state_dict"]["a_optimizer"]
@@ -180,6 +184,7 @@ if __name__ == "__main__":
         device,
         handle_timeout_termination=True,
     )
+    # If resuming training, then load previous replay buffer
     if args.resume:
         rb_data = checkpoint["replay_buffer"]
         rb.load_buffer(rb_data)
@@ -188,9 +193,9 @@ if __name__ == "__main__":
 
     # TRY NOT TO MODIFY: start the game
     start_global_step = 0
+    # If resuming, update starting step
     if args.resume:
         start_global_step = checkpoint["global_step"] + 1
-
     obs = envs.reset()
     hidden_in = None
     for global_step in range(start_global_step, args.total_timesteps):
@@ -380,11 +385,12 @@ if __name__ == "__main__":
                     data_log["losses/alpha_loss"] = alpha_loss.item()
 
         data_log["misc/global_step"] = global_step
-        wandb.log(data_log)
+        wandb.log(data_log, step=global_step)
 
         # Save checkpoints during training
         if args.save:
             if global_step % args.checkpoint_interval == 0:
+                # Save models
                 models = {
                     "actor_state_dict": actor.state_dict(),
                     "qf1_state_dict": qf1.state_dict(),
@@ -392,15 +398,23 @@ if __name__ == "__main__":
                     "qf1_target_state_dict": qf1_target.state_dict(),
                     "qf2_target_state_dict": qf2_target.state_dict(),
                 }
+                # Save optimizers
                 optimizers = {
                     "q_optimizer": q_optimizer.state_dict(),
                     "actor_optimizer": actor_optimizer.state_dict(),
                 }
-                rb_data = rb.save_buffer()
-
                 if args.autotune:
-                    models["log_alpha"] = log_alpha
                     optimizers["a_optimizer"] = a_optimizer.state_dict()
+                # Save replay buffer
+                rb_data = rb.save_buffer()
+                # Save random states, important for reproducibility
+                rng_states = {
+                    "random_rng_state": random.getstate(),
+                    "numpy_rng_state": np.random.get_state(),
+                    "torch_rng_state": torch.get_rng_state(),
+                }
+                if device.type == "cuda":
+                    rng_states["torch_cuda_rng_state"] = torch.cuda.get_rng_state()
 
                 save(
                     wandb.run.name,
@@ -409,6 +423,7 @@ if __name__ == "__main__":
                     models,
                     optimizers,
                     rb_data,
+                    rng_states,
                 )
 
     envs.close()

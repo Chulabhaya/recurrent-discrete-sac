@@ -1,6 +1,10 @@
+import os
+import random
+
 import gym
-from gym_pomdps.wrappers.resetobservation import ResetObservationWrapper
+import numpy as np
 import torch
+from gym_pomdps.wrappers.resetobservation import ResetObservationWrapper
 
 
 def make_env(env_id, seed, idx, capture_video, run_name):
@@ -78,7 +82,7 @@ def make_env_gym_pomdp(env_id, seed, idx, capture_video, run_name, max_episode_l
     return thunk
 
 
-def save(run_name, run_id, global_step, models, optimizers, replay_buffer):
+def save(run_name, run_id, global_step, models, optimizers, replay_buffer, rng_states):
     import os
 
     save_dir = "./trained_models/" + run_name + "_" + run_id + "/"
@@ -93,6 +97,24 @@ def save(run_name, run_id, global_step, models, optimizers, replay_buffer):
             "model_state_dict": models,
             "optimizer_state_dict": optimizers,
             "replay_buffer": replay_buffer,
+            "rng_states": rng_states,
         },
         save_path,
     )
+
+
+def set_seed(seed, device, resume=False, checkpoint=None):
+    os.environ["PYTHONHASHSEED"] = str(seed)
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if device.type == "cuda":
+        torch.cuda.manual_seed(seed)
+        torch.backends.cudnn.deterministic = True
+        torch.backends.cudnn.benchmark = False
+    if resume:
+        random.setstate(checkpoint["rng_states"]["random_rng_state"])
+        np.random.set_state(checkpoint["rng_states"]["numpy_rng_state"])
+        torch.set_rng_state(checkpoint["rng_states"]["torch_rng_state"])
+        if device.type == "cuda":
+            torch.cuda.set_rng_state(checkpoint["rng_states"]["torch_cuda_rng_state"])
