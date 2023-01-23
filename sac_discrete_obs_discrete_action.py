@@ -14,7 +14,7 @@ import torch.optim as optim
 import wandb
 from models import DiscreteActorDiscreteObs, DiscreteCriticDiscreteObs
 from replay_buffer import ReplayBuffer
-from utils import make_env_gym_pomdp
+from utils import make_env_gym_pomdp, save
 
 
 def parse_args():
@@ -32,7 +32,6 @@ def parse_args():
         help="the wandb's project name")
     parser.add_argument("--capture-video", type=lambda x: bool(strtobool(x)), default=False, nargs="?", const=True,
         help="whether to capture videos of the agent performances (check out `videos` folder)")
-
 
     # Algorithm specific arguments
     parser.add_argument("--env-id", type=str, default="POMDP-tiger-episodic-v0",
@@ -61,6 +60,17 @@ def parse_args():
             help="Entropy regularization coefficient.")
     parser.add_argument("--autotune", type=lambda x:bool(strtobool(x)), default=True, nargs="?", const=True,
         help="automatic tuning of the entropy coefficient")
+
+    # Checkpointing specific arguments
+    parser.add_argument("--save", type=lambda x:bool(strtobool(x)), default=True, nargs="?", const=True,
+        help="checkpoint saving during training")
+    parser.add_argument("--checkpoint-interval", type=int, default=1000,
+        help="how often to save checkpoints during training (in timesteps)")
+    parser.add_argument("--resume", type=lambda x: bool(strtobool(x)), default=False, nargs="?", const=True,
+        help="whether to resume training from a checkpoint")
+    parser.add_argument("--checkpoint-path", type=str, default=None,
+        help="path to checkpoint to resume training from")
+
     args = parser.parse_args()
     # fmt: on
     return args
@@ -90,7 +100,16 @@ if __name__ == "__main__":
 
     # Env setup
     envs = gym.vector.SyncVectorEnv(
-        [make_env_gym_pomdp(args.env_id, args.seed, 0, args.capture_video, run_name)]
+        [
+            make_env_gym_pomdp(
+                args.env_id,
+                args.seed,
+                0,
+                args.capture_video,
+                run_name,
+                max_episode_len=10,
+            )
+        ]
     )
     assert isinstance(
         envs.single_action_space, gym.spaces.Discrete
@@ -109,6 +128,26 @@ if __name__ == "__main__":
     )
     actor_optimizer = optim.Adam(list(actor.parameters()), lr=args.policy_lr)
 
+    # If resuming training, load from checkpoints
+    if args.resume:
+        print(
+            "Resuming training from the following checkpoint: " + args.checkpoint_path
+        )
+        checkpoint = torch.load(args.checkpoint_path)
+        actor.load_state_dict(checkpoint["model_state_dict"]["actor_state_dict"])
+        qf1.load_state_dict(checkpoint["model_state_dict"]["qf1_state_dict"])
+        qf2.load_state_dict(checkpoint["model_state_dict"]["qf2_state_dict"])
+        qf1_target.load_state_dict(
+            checkpoint["model_state_dict"]["qf1_target_state_dict"]
+        )
+        qf2_target.load_state_dict(
+            checkpoint["model_state_dict"]["qf2_target_state_dict"]
+        )
+        qf1_target.load_state_dict(checkpoint["optimizer_state_dict"]["q_optimizer"])
+        qf2_target.load_state_dict(
+            checkpoint["optimizer_state_dict"]["actor_optimizer"]
+        )
+
     # Log gradients of models
     wandb.watch([actor, qf1, qf2], log="all")
 
@@ -116,8 +155,15 @@ if __name__ == "__main__":
     if args.autotune:
         target_entropy = -0.3 * torch.log(1 / torch.tensor(envs.single_action_space.n))
         log_alpha = torch.zeros(1, requires_grad=True, device=device)
-        alpha = log_alpha.exp().item()
         a_optimizer = optim.Adam([log_alpha], lr=args.q_lr, eps=1e-4)
+
+        if args.resume:
+            log_alpha = checkpoint["model_state_dict"]["log_alpha"]
+            a_optimizer.load_state_dict(
+                checkpoint["optimizer_state_dict"]["a_optimizer"]
+            )
+
+        alpha = log_alpha.exp().item()
     else:
         alpha = args.alpha
 
@@ -132,8 +178,13 @@ if __name__ == "__main__":
     start_time = time.time()
 
     # TRY NOT TO MODIFY: start the game
+    if args.resume:
+        start_global_step = checkpoint["global_step"]
+    else:
+        start_global_step = 0
+
     obs = envs.reset()
-    for global_step in range(args.total_timesteps):
+    for global_step in range(start_global_step, args.total_timesteps):
         # Store values for data logging for each global step
         data_log = {}
 
@@ -288,5 +339,25 @@ if __name__ == "__main__":
 
         data_log["misc/global_step"] = global_step
         wandb.log(data_log)
+
+        # Save checkpoints during training
+        if args.save:
+            if global_step % args.checkpoint_interval == 0:
+                models = {
+                    "actor_state_dict": actor.state_dict(),
+                    "qf1_state_dict": qf1.state_dict(),
+                    "qf2_state_dict": qf2.state_dict(),
+                    "qf1_target_state_dict": qf1_target.state_dict(),
+                    "qf2_target_state_dict": qf2_target.state_dict(),
+                }
+                optimizers = {
+                    "q_optimizer": q_optimizer.state_dict(),
+                    "actor_optimizer": actor_optimizer.state_dict(),
+                }
+                if args.autotune:
+                    models["log_alpha"] = log_alpha
+                    optimizers["a_optimizer"] = a_optimizer.state_dict
+
+                save(wandb.run.name, global_step, models, optimizers)
 
     envs.close()

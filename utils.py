@@ -1,5 +1,6 @@
 import gym
 from gym_pomdps.wrappers.resetobservation import ResetObservationWrapper
+import torch
 
 
 def make_env(env_id, seed, idx, capture_video, run_name):
@@ -75,3 +76,23 @@ def make_env_gym_pomdp(env_id, seed, idx, capture_video, run_name, max_episode_l
         return env
 
     return thunk
+
+
+def save(run_name, run_id, global_step, models, optimizers, replay_buffer):
+    import os
+
+    save_dir = "./trained_models/" + run_name + "_" + run_id + "/"
+
+    if not os.path.exists(save_dir):
+        os.makedirs(save_dir)
+
+    save_path = save_dir + "global_step_" + str(global_step) + ".pth"
+    torch.save(
+        {
+            "global_step": global_step,
+            "model_state_dict": models,
+            "optimizer_state_dict": optimizers,
+            "replay_buffer": replay_buffer,
+        },
+        save_path,
+    )

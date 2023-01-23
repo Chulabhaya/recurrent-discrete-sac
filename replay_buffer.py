@@ -36,6 +36,32 @@ class ReplayBuffer:
         self.full = False
         self.device = device
 
+    def save_buffer(self):
+        buffer_data = {
+            "obs": self.obs,
+            "next_obs": self.next_obs,
+            "actions": self.actions,
+            "rewards": self.rewards,
+            "dones": self.dones,
+            "handle_timeout_termination": self.handle_timeout_termination,
+            "timeouts": self.timeouts,
+            "pos": self.pos,
+            "full": self.full,
+        }
+
+        return buffer_data
+
+    def load_buffer(self, buffer_data):
+        self.obs = buffer_data["obs"]
+        self.next_obs = buffer_data["next_obs"]
+        self.actions = buffer_data["actions"]
+        self.rewards = buffer_data["rewards"]
+        self.dones = buffer_data["dones"]
+        self.handle_timeout_termination = buffer_data["handle_timeout_termination"]
+        self.timeouts = buffer_data["timeouts"]
+        self.pos = buffer_data["pos"]
+        self.full = buffer_data["full"]
+
     def add(self, obs, next_obs, action, reward, done, infos):
         # Copy to avoid modification by reference
         self.obs[self.pos] = np.array(obs).copy()
@@ -55,9 +81,15 @@ class ReplayBuffer:
             self.pos = 0
 
     def add_dataset(self, obs, next_obs, actions, rewards, dones, timeouts):
-        self.obs = np.reshape(obs.copy(), self.obs.shape).astype(dtype=self.obs_space.dtype)
-        self.next_obs = np.reshape(next_obs.copy(), self.next_obs.shape).astype(dtype=self.obs_space.dtype)
-        self.actions = np.reshape(actions.copy(), self.actions.shape).astype(dtype=self.action_space.dtype)
+        self.obs = np.reshape(obs.copy(), self.obs.shape).astype(
+            dtype=self.obs_space.dtype
+        )
+        self.next_obs = np.reshape(next_obs.copy(), self.next_obs.shape).astype(
+            dtype=self.obs_space.dtype
+        )
+        self.actions = np.reshape(actions.copy(), self.actions.shape).astype(
+            dtype=self.action_space.dtype
+        )
         self.rewards = rewards.copy().astype(dtype=np.float32)
         self.dones = dones.copy().astype(dtype=np.float32)
         self.timeouts = timeouts.copy().astype(dtype=np.float32)
@@ -176,8 +208,12 @@ class ReplayBuffer:
         obs_histories = pad_sequence(obs_histories).to(self.device)
         actions_histories = pad_sequence(actions_histories).to(self.device)
         next_obs_histories = pad_sequence(next_obs_histories).to(self.device)
-        dones_histories = torch.unsqueeze(pad_sequence(dones_histories).to(self.device), 2)
-        rewards_histories = torch.unsqueeze(pad_sequence(rewards_histories).to(self.device), 2)
+        dones_histories = torch.unsqueeze(
+            pad_sequence(dones_histories).to(self.device), 2
+        )
+        rewards_histories = torch.unsqueeze(
+            pad_sequence(rewards_histories).to(self.device), 2
+        )
 
         return (
             obs_histories,

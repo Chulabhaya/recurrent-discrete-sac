@@ -245,7 +245,7 @@ if __name__ == "__main__":
                     qf2_pi = qf2(observations, seq_lengths)
                     min_qf_pi = torch.min(qf1_pi, qf2_pi)
                     # calculate eq. 7 in updated SAC paper
-                    actor_loss_mask = torch.repeat_interleave(q_loss_mask, 2, 2)
+                    actor_loss_mask = torch.repeat_interleave(q_loss_mask, envs.single_action_space.n, 2)
                     actor_loss_mask_nonzero_elements = torch.sum(actor_loss_mask)
                     actor_loss = state_action_probs * (
                         (alpha * state_action_log_pis) - min_qf_pi
