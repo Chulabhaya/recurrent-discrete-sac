@@ -1,4 +1,3 @@
-# docs and experiment results can be found at https://docs.cleanrl.dev/rl-algorithms/sac/#sac_continuous_actionpy
 import argparse
 import os
 import random
@@ -22,7 +21,7 @@ def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--exp-name", type=str, default=os.path.basename(__file__).rstrip(".py"),
         help="the name of this experiment")
-    parser.add_argument("--seed", type=int, default=2,
+    parser.add_argument("--seed", type=int, default=1,
         help="seed of the experiment")
     parser.add_argument("--cuda", type=lambda x: bool(strtobool(x)), default=True, nargs="?", const=True,
         help="if toggled, cuda will be enabled by default")
@@ -64,9 +63,9 @@ def parse_args():
         help="checkpoint saving during training")
     parser.add_argument("--checkpoint-interval", type=int, default=5000,
         help="how often to save checkpoints during training (in timesteps)")
-    parser.add_argument("--resume", type=lambda x: bool(strtobool(x)), default=True, nargs="?", const=True,
+    parser.add_argument("--resume", type=lambda x: bool(strtobool(x)), default=False, nargs="?", const=True,
         help="whether to resume training from a checkpoint")
-    parser.add_argument("--checkpoint-path", type=str, default="trained_models/POMDP-heavenhell_1-episodic-v0__sac_discrete_obs_discrete_action_recurrent__2__1674500324_1j35879b/global_step_5000.pth",
+    parser.add_argument("--checkpoint-path", type=str, default=None,
         help="path to checkpoint to resume training from")
     parser.add_argument("--run-id", type=str, default=None,
         help="wandb unique run id for resuming")
@@ -92,7 +91,7 @@ if __name__ == "__main__":
             resume="must",
             save_code=True,
             settings=wandb.Settings(code_dir="."),
-            # mode="offline",
+            mode="offline",
         )
     else:
         wandb.init(
@@ -102,18 +101,29 @@ if __name__ == "__main__":
             name=run_name,
             save_code=True,
             settings=wandb.Settings(code_dir="."),
-            # mode="offline",
+            mode="offline",
         )
 
     # Load checkpoint if resuming
     if args.resume:
+        print("Resuming from checkpoint: " + args.checkpoint_path)
         checkpoint = torch.load(args.checkpoint_path)
 
     # Set training device
     device = torch.device("cuda" if torch.cuda.is_available() and args.cuda else "cpu")
 
-    # TRY NOT TO MODIFY: seeding
-    set_seed(args.seed)
+    # Set seeding
+    set_seed(args.seed, device)
+    # Set RNG state for seeds if resuming
+    if args.resume:
+        random.setstate(checkpoint["rng_states"]["random_rng_state"])
+        np.random.set_state(checkpoint["rng_states"]["numpy_rng_state"])
+        torch.set_rng_state(checkpoint["rng_states"]["torch_rng_state"])
+        if device.type == "cuda":
+            torch.cuda.set_rng_state(checkpoint["rng_states"]["torch_cuda_rng_state"])
+            torch.cuda.set_rng_state_all(
+                checkpoint["rng_states"]["torch_cuda_rng_state_all"]
+            )
 
     # Env setup
     envs = gym.vector.SyncVectorEnv(
@@ -176,6 +186,7 @@ if __name__ == "__main__":
     else:
         alpha = args.alpha
 
+    # Initialize replay buffer
     envs.single_observation_space.dtype = np.float32
     rb = ReplayBuffer(
         args.buffer_size,
@@ -189,9 +200,10 @@ if __name__ == "__main__":
         rb_data = checkpoint["replay_buffer"]
         rb.load_buffer(rb_data)
 
+    # Start time tracking for run
     start_time = time.time()
 
-    # TRY NOT TO MODIFY: start the game
+    # Start the game
     start_global_step = 0
     # If resuming, update starting step
     if args.resume:
@@ -202,7 +214,7 @@ if __name__ == "__main__":
         # Store values for data logging for each global step
         data_log = {}
 
-        # ALGO LOGIC: put action logic here
+        # Action logic
         if global_step < args.learning_starts:
             actions = np.array(
                 [envs.single_action_space.sample() for _ in range(envs.num_envs)]
@@ -215,10 +227,10 @@ if __name__ == "__main__":
             actions = torch.squeeze(actions, 0).detach().cpu().numpy()
             hidden_in = hidden_out
 
-        # TRY NOT TO MODIFY: execute the game and log data.
+        # Execute the game and log data
         next_obs, rewards, dones, infos = envs.step(actions)
 
-        # TRY NOT TO MODIFY: record rewards for plotting purposes
+        # Record rewards for plotting purposes
         for info in infos:
             if "episode" in info.keys():
                 print(
@@ -228,7 +240,7 @@ if __name__ == "__main__":
                 data_log["misc/episodic_length"] = info["episode"]["r"]
                 break
 
-        # TRY NOT TO MODIFY: save data to reply buffer; handle `terminal_observation`
+        # Save data to reply buffer; handle `terminal_observation`
         real_next_obs = next_obs.copy()
         for idx, d in enumerate(dones):
             if d:
@@ -236,10 +248,10 @@ if __name__ == "__main__":
                 hidden_in = None
         rb.add(obs, real_next_obs, actions, rewards, dones, infos)
 
-        # TRY NOT TO MODIFY: CRUCIAL step easy to overlook
+        # CRUCIAL step easy to overlook
         obs = next_obs
 
-        # ALGO LOGIC: training.
+        # ALGO LOGIC: training
         if global_step > args.learning_starts:
             # sample data from replay buffer
             (
@@ -415,6 +427,9 @@ if __name__ == "__main__":
                 }
                 if device.type == "cuda":
                     rng_states["torch_cuda_rng_state"] = torch.cuda.get_rng_state()
+                    rng_states[
+                        "torch_cuda_rng_state_all"
+                    ] = torch.cuda.get_rng_state_all()
 
                 save(
                     wandb.run.name,

@@ -103,18 +103,13 @@ def save(run_name, run_id, global_step, models, optimizers, replay_buffer, rng_s
     )
 
 
-def set_seed(seed, device, resume=False, checkpoint=None):
+def set_seed(seed, device):
     os.environ["PYTHONHASHSEED"] = str(seed)
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
     if device.type == "cuda":
         torch.cuda.manual_seed(seed)
+        torch.cuda.manual_seed_all(seed)
         torch.backends.cudnn.deterministic = True
         torch.backends.cudnn.benchmark = False
-    if resume:
-        random.setstate(checkpoint["rng_states"]["random_rng_state"])
-        np.random.set_state(checkpoint["rng_states"]["numpy_rng_state"])
-        torch.set_rng_state(checkpoint["rng_states"]["torch_rng_state"])
-        if device.type == "cuda":
-            torch.cuda.set_rng_state(checkpoint["rng_states"]["torch_cuda_rng_state"])
