@@ -35,6 +35,8 @@ def parse_args():
         help="the id of the environment")
     parser.add_argument("--total-timesteps", type=int, default=100000,
         help="total timesteps of the experiments")
+    parser.add_argument("--maximum-episode-length", type=int, default=100,
+        help="maximum length for episodes for gym POMDP environment")
     parser.add_argument("--buffer-size", type=int, default=int(1e5),
         help="the replay memory buffer size")
     parser.add_argument("--gamma", type=float, default=0.99,
@@ -134,7 +136,7 @@ if __name__ == "__main__":
                 0,
                 args.capture_video,
                 run_name,
-                max_episode_len=50,
+                max_episode_len=args.maximum_episode_length,
             )
         ]
     )
