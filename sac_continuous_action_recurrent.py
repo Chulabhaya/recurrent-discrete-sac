@@ -14,7 +14,7 @@ import torch.optim as optim
 import wandb
 from models import RecurrentContinuousActor, RecurrentContinuousCritic
 from replay_buffer import ReplayBuffer
-from utils import make_env
+from utils import make_env, save, set_seed
 
 
 def parse_args():
@@ -24,8 +24,6 @@ def parse_args():
         help="the name of this experiment")
     parser.add_argument("--seed", type=int, default=1,
         help="seed of the experiment")
-    parser.add_argument("--torch-deterministic", type=lambda x: bool(strtobool(x)), default=True, nargs="?", const=True,
-        help="if toggled, `torch.backends.cudnn.deterministic=False`")
     parser.add_argument("--cuda", type=lambda x: bool(strtobool(x)), default=True, nargs="?", const=True,
         help="if toggled, cuda will be enabled by default")
     parser.add_argument("--wandb-project-name", type=str, default="sac-continuous-action-recurrent",
@@ -48,8 +46,6 @@ def parse_args():
         help="the batch size of sample from the reply memory")
     parser.add_argument("--history-length", type=int, default=4,
         help="the observation sequence length (history) to use")
-    parser.add_argument("--exploration-noise", type=float, default=0.1,
-        help="the scale of exploration noise")
     parser.add_argument("--learning-starts", type=int, default=5e3,
         help="timestep to start learning")
     parser.add_argument("--policy-lr", type=float, default=3e-4,
@@ -60,12 +56,23 @@ def parse_args():
         help="the frequency of training policy (delayed)")
     parser.add_argument("--target-network-frequency", type=int, default=1, # Denis Yarats' implementation delays this by 2.
         help="the frequency of updates for the target nerworks")
-    parser.add_argument("--noise-clip", type=float, default=0.5,
-        help="noise clip parameter of the Target Policy Smoothing Regularization")
     parser.add_argument("--alpha", type=float, default=0.2,
             help="Entropy regularization coefficient.")
     parser.add_argument("--autotune", type=lambda x:bool(strtobool(x)), default=True, nargs="?", const=True,
         help="automatic tuning of the entropy coefficient")
+
+    # Checkpointing specific arguments
+    parser.add_argument("--save", type=lambda x:bool(strtobool(x)), default=True, nargs="?", const=True,
+        help="checkpoint saving during training")
+    parser.add_argument("--checkpoint-interval", type=int, default=5000,
+        help="how often to save checkpoints during training (in timesteps)")
+    parser.add_argument("--resume", type=lambda x: bool(strtobool(x)), default=False, nargs="?", const=True,
+        help="whether to resume training from a checkpoint")
+    parser.add_argument("--checkpoint-path", type=str, default=None,
+        help="path to checkpoint to resume training from")
+    parser.add_argument("--run-id", type=str, default=None,
+        help="wandb unique run id for resuming")
+
     args = parser.parse_args()
     # fmt: on
     return args
@@ -74,24 +81,54 @@ def parse_args():
 if __name__ == "__main__":
     args = parse_args()
     run_name = f"{args.env_id}__{args.exp_name}__{args.seed}__{int(time.time())}"
-    wandb.init(
-        project=args.wandb_project_name,
-        sync_tensorboard=True,
-        config=vars(args),
-        name=run_name,
-        monitor_gym=True,
-        save_code=True,
-    )
+    run_id = wandb.util.generate_id()
 
-    # TRY NOT TO MODIFY: seeding
-    random.seed(args.seed)
-    np.random.seed(args.seed)
-    torch.manual_seed(args.seed)
-    torch.backends.cudnn.deterministic = args.torch_deterministic
+    # If a unique wandb run id is given, then resume from that, otherwise
+    # generate new run for resuming
+    if args.resume and args.run_id is not None:
+        wandb.init(
+            id=args.run_id,
+            project=args.wandb_project_name,
+            config=vars(args),
+            name=run_name,
+            resume="must",
+            save_code=True,
+            settings=wandb.Settings(code_dir="."),
+            mode="offline",
+        )
+    else:
+        wandb.init(
+            id=run_id,
+            project=args.wandb_project_name,
+            config=vars(args),
+            name=run_name,
+            save_code=True,
+            settings=wandb.Settings(code_dir="."),
+            mode="offline",
+        )
 
+    # Load checkpoint if resuming
+    if args.resume:
+        print("Resuming from checkpoint: " + args.checkpoint_path)
+        checkpoint = torch.load(args.checkpoint_path)
+
+    # Set training device
     device = torch.device("cuda" if torch.cuda.is_available() and args.cuda else "cpu")
 
-    # env setup
+    # Set seeding
+    set_seed(args.seed, device)
+    # Set RNG state for seeds if resuming
+    if args.resume:
+        random.setstate(checkpoint["rng_states"]["random_rng_state"])
+        np.random.set_state(checkpoint["rng_states"]["numpy_rng_state"])
+        torch.set_rng_state(checkpoint["rng_states"]["torch_rng_state"])
+        if device.type == "cuda":
+            torch.cuda.set_rng_state(checkpoint["rng_states"]["torch_cuda_rng_state"])
+            torch.cuda.set_rng_state_all(
+                checkpoint["rng_states"]["torch_cuda_rng_state_all"]
+            )
+
+    # Env setup
     envs = gym.vector.SyncVectorEnv(
         [make_env(args.env_id, args.seed, 0, args.capture_video, run_name)]
     )
@@ -101,6 +138,7 @@ if __name__ == "__main__":
 
     max_action = float(envs.single_action_space.high[0])
 
+    # Initialize models and optimizers
     actor = RecurrentContinuousActor(envs).to(device)
     qf1 = RecurrentContinuousCritic(envs).to(device)
     qf2 = RecurrentContinuousCritic(envs).to(device)
@@ -113,8 +151,21 @@ if __name__ == "__main__":
     )
     actor_optimizer = optim.Adam(list(actor.parameters()), lr=args.policy_lr)
 
-    # Log gradients of models
-    wandb.watch([actor, qf1, qf2], log="all")
+    # If resuming training, load models and optimizers
+    if args.resume:
+        actor.load_state_dict(checkpoint["model_state_dict"]["actor_state_dict"])
+        qf1.load_state_dict(checkpoint["model_state_dict"]["qf1_state_dict"])
+        qf2.load_state_dict(checkpoint["model_state_dict"]["qf2_state_dict"])
+        qf1_target.load_state_dict(
+            checkpoint["model_state_dict"]["qf1_target_state_dict"]
+        )
+        qf2_target.load_state_dict(
+            checkpoint["model_state_dict"]["qf2_target_state_dict"]
+        )
+        q_optimizer.load_state_dict(checkpoint["optimizer_state_dict"]["q_optimizer"])
+        actor_optimizer.load_state_dict(
+            checkpoint["optimizer_state_dict"]["actor_optimizer"]
+        )
 
     # Automatic entropy tuning
     if args.autotune:
@@ -122,11 +173,18 @@ if __name__ == "__main__":
             torch.Tensor(envs.single_action_space.shape).to(device)
         ).item()
         log_alpha = torch.zeros(1, requires_grad=True, device=device)
-        alpha = log_alpha.exp().item()
         a_optimizer = optim.Adam([log_alpha], lr=args.q_lr)
+        # If resuming, load optimizer
+        if args.resume:
+            a_optimizer.load_state_dict(
+                checkpoint["optimizer_state_dict"]["a_optimizer"]
+            )
+
+        alpha = log_alpha.exp().item()
     else:
         alpha = args.alpha
 
+    # Initialize replay buffer
     envs.single_observation_space.dtype = np.float32
     rb = ReplayBuffer(
         args.buffer_size,
@@ -135,9 +193,19 @@ if __name__ == "__main__":
         device,
         handle_timeout_termination=True,
     )
+    # If resuming training, then load previous replay buffer
+    if args.resume:
+        rb_data = checkpoint["replay_buffer"]
+        rb.load_buffer(rb_data)
+
+    # Start time tracking for run
     start_time = time.time()
 
-    # TRY NOT TO MODIFY: start the game
+    # Start the game
+    start_global_step = 0
+    # If resuming, update starting step
+    if args.resume:
+        start_global_step = checkpoint["global_step"] + 1
     obs = envs.reset()
     hidden_in = None
     for global_step in range(args.total_timesteps):
@@ -157,10 +225,10 @@ if __name__ == "__main__":
             actions = torch.squeeze(actions, 0).detach().cpu().numpy()
             hidden_in = hidden_out
 
-        # TRY NOT TO MODIFY: execute the game and log data.
+        # Execute the game and log data
         next_obs, rewards, dones, infos = envs.step(actions)
 
-        # TRY NOT TO MODIFY: record rewards for plotting purposes
+        # Record rewards for plotting purposes
         for info in infos:
             if "episode" in info.keys():
                 print(
@@ -170,7 +238,7 @@ if __name__ == "__main__":
                 data_log["misc/episodic_length"] = info["episode"]["r"]
                 break
 
-        # TRY NOT TO MODIFY: save data to reply buffer; handle `terminal_observation`
+        # Save data to reply buffer; handle `terminal_observation`
         real_next_obs = next_obs.copy()
         for idx, d in enumerate(dones):
             if d:
@@ -178,10 +246,10 @@ if __name__ == "__main__":
                 hidden_in = None
         rb.add(obs, real_next_obs, actions, rewards, dones, infos)
 
-        # TRY NOT TO MODIFY: CRUCIAL step easy to overlook
+        # CRUCIAL step easy to overlook
         obs = next_obs
 
-        # ALGO LOGIC: training.
+        # ALGO LOGIC: training
         if global_step > args.learning_starts:
             (
                 observations,
@@ -215,21 +283,21 @@ if __name__ == "__main__":
             # calculate eq. 5 in updated SAC paper
             qf1_a_values = qf1(observations, actions, seq_lengths)
             qf2_a_values = qf2(observations, actions, seq_lengths)
-            loss_mask = torch.unsqueeze(
+            q_loss_mask = torch.unsqueeze(
                 torch.arange(torch.max(seq_lengths))[:, None] < seq_lengths[None, :], 2
             ).to(device)
-            loss_mask_nonzero_elements = torch.sum(seq_lengths).to(device)
-            qf1_loss = 0.5 * (
+            q_loss_mask_nonzero_elements = torch.sum(q_loss_mask).to(device)
+            qf1_loss = (
                 torch.sum(
                     F.mse_loss(qf1_a_values, next_q_value, reduction="none") * loss_mask
                 )
-                / loss_mask_nonzero_elements
+                / q_loss_mask_nonzero_elements
             )
-            qf2_loss = 0.5 * (
+            qf2_loss = (
                 torch.sum(
                     F.mse_loss(qf2_a_values, next_q_value, reduction="none") * loss_mask
                 )
-                / loss_mask_nonzero_elements
+                / q_loss_mask_nonzero_elements
             )
             qf_loss = qf1_loss + qf2_loss
 
@@ -247,9 +315,13 @@ if __name__ == "__main__":
                     qf2_pi = qf2(observations, pi, seq_lengths)
                     min_qf_pi = torch.min(qf1_pi, qf2_pi)
                     # calculate eq. 7 in updated SAC paper
+                    actor_loss_mask = torch.repeat_interleave(
+                        q_loss_mask, envs.single_action_space.shape, 2
+                    )
+                    actor_loss_mask_nonzero_elements = torch.sum(actor_loss_mask)
                     actor_loss = (alpha * log_pi) - min_qf_pi
                     actor_loss = (
-                        torch.sum(actor_loss * loss_mask) / loss_mask_nonzero_elements
+                        torch.sum(actor_loss * actor_loss_mask) / actor_loss_mask_nonzero_elements
                     )
 
                     # calculate eq. 9 in updated SAC paper
@@ -265,8 +337,8 @@ if __name__ == "__main__":
                         # calculate eq. 18 in updated SAC paper
                         alpha_loss = -log_alpha * (log_pi + target_entropy)
                         alpha_loss = (
-                            torch.sum(alpha_loss * loss_mask)
-                            / loss_mask_nonzero_elements
+                            torch.sum(alpha_loss * actor_loss_mask)
+                            / actor_loss_mask_nonzero_elements
                         )
 
                         # calculate gradient of eq. 18
@@ -307,6 +379,48 @@ if __name__ == "__main__":
                     data_log["losses/alpha_loss"] = alpha_loss.item()
 
         data_log["misc/global_step"] = global_step
-        wandb.log(data_log)
+        wandb.log(data_log, step=global_step)
+
+        # Save checkpoints during training
+        if args.save:
+            if global_step % args.checkpoint_interval == 0:
+                # Save models
+                models = {
+                    "actor_state_dict": actor.state_dict(),
+                    "qf1_state_dict": qf1.state_dict(),
+                    "qf2_state_dict": qf2.state_dict(),
+                    "qf1_target_state_dict": qf1_target.state_dict(),
+                    "qf2_target_state_dict": qf2_target.state_dict(),
+                }
+                # Save optimizers
+                optimizers = {
+                    "q_optimizer": q_optimizer.state_dict(),
+                    "actor_optimizer": actor_optimizer.state_dict(),
+                }
+                if args.autotune:
+                    optimizers["a_optimizer"] = a_optimizer.state_dict()
+                # Save replay buffer
+                rb_data = rb.save_buffer()
+                # Save random states, important for reproducibility
+                rng_states = {
+                    "random_rng_state": random.getstate(),
+                    "numpy_rng_state": np.random.get_state(),
+                    "torch_rng_state": torch.get_rng_state(),
+                }
+                if device.type == "cuda":
+                    rng_states["torch_cuda_rng_state"] = torch.cuda.get_rng_state()
+                    rng_states[
+                        "torch_cuda_rng_state_all"
+                    ] = torch.cuda.get_rng_state_all()
+
+                save(
+                    wandb.run.name,
+                    run_id,
+                    global_step,
+                    models,
+                    optimizers,
+                    rb_data,
+                    rng_states,
+                )
 
     envs.close()

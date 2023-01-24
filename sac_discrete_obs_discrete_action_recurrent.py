@@ -45,6 +45,8 @@ def parse_args():
         help="target smoothing coefficient (default: 0.005)")
     parser.add_argument("--batch-size", type=int, default=256,
         help="the batch size of sample from the reply memory")
+    parser.add_argument("--history-length", type=int, default=None,
+        help="the observation sequence length (history) to use")
     parser.add_argument("--learning-starts", type=int, default=5e3,
         help="timestep to start learning")
     parser.add_argument("--policy-lr", type=float, default=3e-4,
@@ -216,7 +218,7 @@ if __name__ == "__main__":
         # Store values for data logging for each global step
         data_log = {}
 
-        # Action logic
+        # ALGO LOGIC: put action logic here
         if global_step < args.learning_starts:
             actions = np.array(
                 [envs.single_action_space.sample() for _ in range(envs.num_envs)]
@@ -263,7 +265,7 @@ if __name__ == "__main__":
                 dones,
                 rewards,
                 seq_lengths,
-            ) = rb.sample_history(args.batch_size)
+            ) = rb.sample_history(args.batch_size, args.history_length)
             observations = observations.squeeze(2).long()
             next_observations = next_observations.squeeze(2).long()
             # ---------- update critic ---------- #
