@@ -62,7 +62,7 @@ class ReplayBuffer:
         self.pos = buffer_data["pos"]
         self.full = buffer_data["full"]
 
-    def add(self, obs, next_obs, action, reward, done, infos):
+    def add(self, obs, next_obs, action, reward, done, info):
         # Copy to avoid modification by reference
         self.obs[self.pos] = np.array(obs).copy()
         self.next_obs[self.pos] = np.array(next_obs).copy()
@@ -71,9 +71,7 @@ class ReplayBuffer:
         self.dones[self.pos] = np.array(done).copy()
 
         if self.handle_timeout_termination:
-            self.timeouts[self.pos] = np.array(
-                [info.get("TimeLimit.truncated", False) for info in infos]
-            )
+            self.timeouts[self.pos] = np.array(info.get("TimeLimit.truncated", False))
 
         self.pos += 1
         if self.pos == self.buffer_size:

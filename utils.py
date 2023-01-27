@@ -28,19 +28,15 @@ def make_env(env_id, seed, idx, capture_video, run_name):
     env : gym environment
         Gym environment to be used for learning.
     """
-
-    def thunk():
-        env = gym.make(env_id)
-        env = gym.wrappers.RecordEpisodeStatistics(env)
-        if capture_video:
-            if idx == 0:
-                env = gym.wrappers.RecordVideo(env, f"videos/{run_name}")
-        env.seed(seed)
-        env.action_space.seed(seed)
-        env.observation_space.seed(seed)
-        return env
-
-    return thunk
+    env = gym.make(env_id)
+    env = gym.wrappers.RecordEpisodeStatistics(env)
+    if capture_video:
+        if idx == 0:
+            env = gym.wrappers.RecordVideo(env, f"videos/{run_name}")
+    env.seed(seed)
+    env.action_space.seed(seed)
+    env.observation_space.seed(seed)
+    return env
 
 
 def make_env_gym_pomdp(env_id, seed, idx, capture_video, run_name, max_episode_len):
@@ -65,21 +61,17 @@ def make_env_gym_pomdp(env_id, seed, idx, capture_video, run_name, max_episode_l
     env : gym environment
         Gym environment to be used for learning.
     """
-
-    def thunk():
-        env = gym.wrappers.TimeLimit(
-            ResetObservationWrapper(gym.make(env_id)), max_episode_steps=max_episode_len
-        )
-        env = gym.wrappers.RecordEpisodeStatistics(env)
-        if capture_video:
-            if idx == 0:
-                env = gym.wrappers.RecordVideo(env, f"videos/{run_name}")
-        env.seed(seed)
-        env.action_space.seed(seed)
-        env.observation_space.seed(seed)
-        return env
-
-    return thunk
+    env = gym.wrappers.TimeLimit(
+        ResetObservationWrapper(gym.make(env_id)), max_episode_steps=max_episode_len
+    )
+    env = gym.wrappers.RecordEpisodeStatistics(env)
+    if capture_video:
+        if idx == 0:
+            env = gym.wrappers.RecordVideo(env, f"videos/{run_name}")
+    env.seed(seed)
+    env.action_space.seed(seed)
+    env.observation_space.seed(seed)
+    return env
 
 
 def save(run_name, run_id, global_step, models, optimizers, replay_buffer, rng_states):

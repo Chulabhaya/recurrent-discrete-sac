@@ -1,4 +1,3 @@
-# docs and experiment results can be found at https://docs.cleanrl.dev/rl-algorithms/sac/#sac_continuous_actionpy
 import argparse
 import os
 import random
@@ -95,6 +94,7 @@ if __name__ == "__main__":
             save_code=True,
             settings=wandb.Settings(code_dir="."),
             mode="offline",
+            group=args.env_id,
         )
     else:
         wandb.init(
@@ -105,6 +105,7 @@ if __name__ == "__main__":
             save_code=True,
             settings=wandb.Settings(code_dir="."),
             mode="offline",
+            group=args.env_id,
         )
 
     # Load checkpoint if resuming
@@ -129,21 +130,19 @@ if __name__ == "__main__":
             )
 
     # Env setup
-    envs = gym.vector.SyncVectorEnv(
-        [make_env(args.env_id, args.seed, 0, args.capture_video, run_name)]
-    )
+    env = make_env(args.env_id, args.seed, 0, args.capture_video, run_name)
     assert isinstance(
-        envs.single_action_space, gym.spaces.Box
+        env.action_space, gym.spaces.Box
     ), "only continuous action space is supported"
 
-    max_action = float(envs.single_action_space.high[0])
+    max_action = float(env.action_space.high[0])
 
     # Initialize models and optimizers
-    actor = RecurrentContinuousActor(envs).to(device)
-    qf1 = RecurrentContinuousCritic(envs).to(device)
-    qf2 = RecurrentContinuousCritic(envs).to(device)
-    qf1_target = RecurrentContinuousCritic(envs).to(device)
-    qf2_target = RecurrentContinuousCritic(envs).to(device)
+    actor = RecurrentContinuousActor(env).to(device)
+    qf1 = RecurrentContinuousCritic(env).to(device)
+    qf2 = RecurrentContinuousCritic(env).to(device)
+    qf1_target = RecurrentContinuousCritic(env).to(device)
+    qf2_target = RecurrentContinuousCritic(env).to(device)
     qf1_target.load_state_dict(qf1.state_dict())
     qf2_target.load_state_dict(qf2.state_dict())
     q_optimizer = optim.Adam(
@@ -170,7 +169,7 @@ if __name__ == "__main__":
     # Automatic entropy tuning
     if args.autotune:
         target_entropy = -torch.prod(
-            torch.Tensor(envs.single_action_space.shape).to(device)
+            torch.Tensor(env.action_space.shape).to(device)
         ).item()
         log_alpha = torch.zeros(1, requires_grad=True, device=device)
         a_optimizer = optim.Adam([log_alpha], lr=args.q_lr)
@@ -185,11 +184,11 @@ if __name__ == "__main__":
         alpha = args.alpha
 
     # Initialize replay buffer
-    envs.single_observation_space.dtype = np.float32
+    env.observation_space.dtype = np.float32
     rb = ReplayBuffer(
         args.buffer_size,
-        envs.single_observation_space,
-        envs.single_action_space,
+        env.observation_space,
+        env.action_space,
         device,
         handle_timeout_termination=True,
     )
@@ -206,48 +205,51 @@ if __name__ == "__main__":
     # If resuming, update starting step
     if args.resume:
         start_global_step = checkpoint["global_step"] + 1
-    obs = envs.reset()
+
+    episodic_return = 0
+    episodic_length = 0
     hidden_in = None
+    obs = env.reset()
     for global_step in range(args.total_timesteps):
         # Store values for data logging for each global step
         data_log = {}
 
         # ALGO LOGIC: put action logic here
         if global_step < args.learning_starts:
-            actions = np.array(
-                [envs.single_action_space.sample() for _ in range(envs.num_envs)]
-            )
+            action = env.action_space.sample()
         else:
             seq_lengths = torch.LongTensor([1])
-            actions, _, _, hidden_out = actor.get_action(
-                torch.unsqueeze(torch.Tensor(obs).to(device), 0), seq_lengths, hidden_in
+            action, _, _, hidden_out = actor.get_action(
+                torch.tensor(obs, dtype=torch.float32).to(device).view(1, 1, -1),
+                seq_lengths,
+                hidden_in,
             )
-            actions = torch.squeeze(actions, 0).detach().cpu().numpy()
+            action = action.view(-1).detach().cpu().numpy()
             hidden_in = hidden_out
 
-        # Execute the game and log data
-        next_obs, rewards, dones, infos = envs.step(actions)
+        # Take step in environment
+        next_obs, reward, done, info = env.step(action)
 
-        # Record rewards for plotting purposes
-        for info in infos:
-            if "episode" in info.keys():
-                print(
-                    f"global_step={global_step}, episodic_return={info['episode']['r']}"
-                )
-                data_log["misc/episodic_return"] = info["episode"]["r"]
-                data_log["misc/episodic_length"] = info["episode"]["r"]
-                break
+        # Save data to replay buffer
+        rb.add(obs, next_obs, action, reward, done, info)
 
-        # Save data to reply buffer; handle `terminal_observation`
-        real_next_obs = next_obs.copy()
-        for idx, d in enumerate(dones):
-            if d:
-                real_next_obs[idx] = infos[idx]["terminal_observation"]
-                hidden_in = None
-        rb.add(obs, real_next_obs, actions, rewards, dones, infos)
+        # Update episodic reward and length
+        episodic_return += reward
+        episodic_length += 1
 
-        # CRUCIAL step easy to overlook
+        # Update next obs
         obs = next_obs
+
+        # Handle episode end, record rewards for plotting purposes
+        if done:
+            print(f"global_step={global_step}, episodic_return={episodic_return}")
+            data_log["misc/episodic_return"] = episodic_return
+            data_log["misc/episodic_length"] = episodic_length
+
+            episodic_return = 0
+            episodic_length = 0
+            hidden_in = None
+            obs = env.reset()
 
         # ALGO LOGIC: training
         if global_step > args.learning_starts:
@@ -289,13 +291,15 @@ if __name__ == "__main__":
             q_loss_mask_nonzero_elements = torch.sum(q_loss_mask).to(device)
             qf1_loss = (
                 torch.sum(
-                    F.mse_loss(qf1_a_values, next_q_value, reduction="none") * loss_mask
+                    F.mse_loss(qf1_a_values, next_q_value, reduction="none")
+                    * q_loss_mask
                 )
                 / q_loss_mask_nonzero_elements
             )
             qf2_loss = (
                 torch.sum(
-                    F.mse_loss(qf2_a_values, next_q_value, reduction="none") * loss_mask
+                    F.mse_loss(qf2_a_values, next_q_value, reduction="none")
+                    * q_loss_mask
                 )
                 / q_loss_mask_nonzero_elements
             )
@@ -316,12 +320,13 @@ if __name__ == "__main__":
                     min_qf_pi = torch.min(qf1_pi, qf2_pi)
                     # calculate eq. 7 in updated SAC paper
                     actor_loss_mask = torch.repeat_interleave(
-                        q_loss_mask, envs.single_action_space.shape, 2
+                        q_loss_mask, env.action_space.shape[0], 2
                     )
                     actor_loss_mask_nonzero_elements = torch.sum(actor_loss_mask)
                     actor_loss = (alpha * log_pi) - min_qf_pi
                     actor_loss = (
-                        torch.sum(actor_loss * actor_loss_mask) / actor_loss_mask_nonzero_elements
+                        torch.sum(actor_loss * actor_loss_mask)
+                        / actor_loss_mask_nonzero_elements
                     )
 
                     # calculate eq. 9 in updated SAC paper
@@ -423,4 +428,4 @@ if __name__ == "__main__":
                     rng_states,
                 )
 
-    envs.close()
+    env.close()

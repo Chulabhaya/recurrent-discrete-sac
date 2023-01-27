@@ -24,8 +24,8 @@ class ContinuousCritic(nn.Module):
         """
         super().__init__()
         self.fc1 = nn.Linear(
-            np.array(env.single_observation_space.shape).prod()
-            + np.prod(env.single_action_space.shape),
+            np.array(env.observation_space.shape).prod()
+            + np.prod(env.action_space.shape),
             256,
         )
         self.fc2 = nn.Linear(256, 256)
@@ -67,10 +67,10 @@ class ContinuousActor(nn.Module):
             Gym environment being used for learning.
         """
         super().__init__()
-        self.fc1 = nn.Linear(np.array(env.single_observation_space.shape).prod(), 256)
+        self.fc1 = nn.Linear(np.array(env.observation_space.shape).prod(), 256)
         self.fc2 = nn.Linear(256, 256)
-        self.fc_mean = nn.Linear(256, np.prod(env.single_action_space.shape))
-        self.fc_logstd = nn.Linear(256, np.prod(env.single_action_space.shape))
+        self.fc_mean = nn.Linear(256, np.prod(env.action_space.shape))
+        self.fc_logstd = nn.Linear(256, np.prod(env.action_space.shape))
         # action rescaling
         self.register_buffer(
             "action_scale",
@@ -160,8 +160,8 @@ class RecurrentContinuousCritic(nn.Module):
         """
         super().__init__()
         self.fc1 = nn.Linear(
-            np.array(env.single_observation_space.shape).prod()
-            + np.prod(env.single_action_space.shape),
+            np.array(env.observation_space.shape).prod()
+            + np.prod(env.action_space.shape),
             256,
         )
         self.lstm1 = nn.LSTM(256, 256)
@@ -212,11 +212,11 @@ class RecurrentContinuousActor(nn.Module):
             Gym environment being used for learning.
         """
         super().__init__()
-        self.fc1 = nn.Linear(np.array(env.single_observation_space.shape).prod(), 256)
+        self.fc1 = nn.Linear(np.array(env.observation_space.shape).prod(), 256)
         self.lstm1 = nn.LSTM(256, 256)
         self.fc2 = nn.Linear(256, 256)
-        self.fc_mean = nn.Linear(256, np.prod(env.single_action_space.shape))
-        self.fc_logstd = nn.Linear(256, np.prod(env.single_action_space.shape))
+        self.fc_mean = nn.Linear(256, np.prod(env.action_space.shape))
+        self.fc_logstd = nn.Linear(256, np.prod(env.action_space.shape))
         # action rescaling
         self.register_buffer(
             "action_scale",
@@ -322,10 +322,10 @@ class RecurrentDiscreteCritic(nn.Module):
             Gym environment being used for learning.
         """
         super().__init__()
-        self.fc1 = nn.Linear(np.array(env.single_observation_space.shape).prod(), 256)
+        self.fc1 = nn.Linear(np.array(env.observation_space.shape).prod(), 256)
         self.lstm1 = nn.LSTM(256, 256)
         self.fc2 = nn.Linear(256, 256)
-        self.fc3 = nn.Linear(256, env.single_action_space.n)
+        self.fc3 = nn.Linear(256, env.action_space.n)
 
     def forward(self, x, seq_lengths):
         """
@@ -371,10 +371,10 @@ class RecurrentDiscreteActor(nn.Module):
             Gym environment being used for learning.
         """
         super().__init__()
-        self.fc1 = nn.Linear(np.array(env.single_observation_space.shape).prod(), 256)
+        self.fc1 = nn.Linear(np.array(env.observation_space.shape).prod(), 256)
         self.lstm1 = nn.LSTM(256, 256)
         self.fc2 = nn.Linear(256, 256)
-        self.fc_out = nn.Linear(256, env.single_action_space.n)
+        self.fc_out = nn.Linear(256, env.action_space.n)
         self.softmax = nn.Softmax(dim=-1)
 
     def forward(self, x, seq_lengths, in_hidden=None):
@@ -464,9 +464,9 @@ class DiscreteCritic(nn.Module):
             Gym environment being used for learning.
         """
         super().__init__()
-        self.fc1 = nn.Linear(np.array(env.single_observation_space.shape).prod(), 256)
+        self.fc1 = nn.Linear(np.array(env.observation_space.shape).prod(), 256)
         self.fc2 = nn.Linear(256, 256)
-        self.fc3 = nn.Linear(256, env.single_action_space.n)
+        self.fc3 = nn.Linear(256, env.action_space.n)
 
     def forward(self, x):
         """
@@ -501,9 +501,9 @@ class DiscreteActor(nn.Module):
             Gym environment being used for learning.
         """
         super().__init__()
-        self.fc1 = nn.Linear(np.array(env.single_observation_space.shape).prod(), 256)
+        self.fc1 = nn.Linear(np.array(env.observation_space.shape).prod(), 256)
         self.fc2 = nn.Linear(256, 256)
-        self.fc_out = nn.Linear(256, env.single_action_space.n)
+        self.fc_out = nn.Linear(256, env.action_space.n)
         self.softmax = nn.Softmax(dim=-1)
 
     def forward(self, x):
@@ -592,10 +592,10 @@ class RecurrentDiscreteCriticDiscreteObs(nn.Module):
             Gym environment being used for learning.
         """
         super().__init__()
-        self.embedding = nn.Embedding(env.single_observation_space.n, 256)
+        self.embedding = nn.Embedding(env.observation_space.n, 256)
         self.lstm1 = nn.LSTM(256, 256)
         self.fc2 = nn.Linear(256, 256)
-        self.fc3 = nn.Linear(256, env.single_action_space.n)
+        self.fc3 = nn.Linear(256, env.action_space.n)
 
     def forward(self, x, seq_lengths):
         """
@@ -641,10 +641,10 @@ class RecurrentDiscreteActorDiscreteObs(nn.Module):
             Gym environment being used for learning.
         """
         super().__init__()
-        self.embedding = nn.Embedding(env.single_observation_space.n, 256)
+        self.embedding = nn.Embedding(env.observation_space.n, 256)
         self.lstm1 = nn.LSTM(256, 256)
         self.fc2 = nn.Linear(256, 256)
-        self.fc_out = nn.Linear(256, env.single_action_space.n)
+        self.fc_out = nn.Linear(256, env.action_space.n)
         self.softmax = nn.Softmax(dim=-1)
 
     def forward(self, x, seq_lengths, in_hidden=None):
@@ -734,9 +734,9 @@ class DiscreteCriticDiscreteObs(nn.Module):
             Gym environment being used for learning.
         """
         super().__init__()
-        self.embedding = nn.Embedding(env.single_observation_space.n, 256)
+        self.embedding = nn.Embedding(env.observation_space.n, 256)
         self.fc2 = nn.Linear(256, 256)
-        self.fc3 = nn.Linear(256, env.single_action_space.n)
+        self.fc3 = nn.Linear(256, env.action_space.n)
 
     def forward(self, x):
         """
@@ -771,9 +771,9 @@ class DiscreteActorDiscreteObs(nn.Module):
             Gym environment being used for learning.
         """
         super().__init__()
-        self.embedding = nn.Embedding(env.single_observation_space.n, 256)
+        self.embedding = nn.Embedding(env.observation_space.n, 256)
         self.fc2 = nn.Linear(256, 256)
-        self.fc_out = nn.Linear(256, env.single_action_space.n)
+        self.fc_out = nn.Linear(256, env.action_space.n)
         self.softmax = nn.Softmax(dim=-1)
 
     def forward(self, x):

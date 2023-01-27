@@ -15,7 +15,7 @@ import wandb
 from models import (RecurrentDiscreteActorDiscreteObs,
                     RecurrentDiscreteCriticDiscreteObs)
 from replay_buffer import ReplayBuffer
-from utils import make_env_gym_pomdp
+from utils import make_env_gym_pomdp, set_seed, save
 
 
 def parse_args():
@@ -25,8 +25,6 @@ def parse_args():
         help="the name of this experiment")
     parser.add_argument("--seed", type=int, default=1,
         help="seed of the experiment")
-    parser.add_argument("--torch-deterministic", type=lambda x: bool(strtobool(x)), default=True, nargs="?", const=True,
-        help="if toggled, `torch.backends.cudnn.deterministic=False`")
     parser.add_argument("--cuda", type=lambda x: bool(strtobool(x)), default=True, nargs="?", const=True,
         help="if toggled, cuda will be enabled by default")
     parser.add_argument("--wandb-project-name", type=str, default="sac-discrete-obs-discrete-action-recurrent-offline",

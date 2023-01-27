@@ -11,7 +11,8 @@ import torch.nn.functional as F
 import torch.optim as optim
 
 import wandb
-from models import RecurrentDiscreteActorDiscreteObs, RecurrentDiscreteCriticDiscreteObs
+from models import (RecurrentDiscreteActorDiscreteObs,
+                    RecurrentDiscreteCriticDiscreteObs)
 from replay_buffer import ReplayBuffer
 from utils import make_env_gym_pomdp, save, set_seed
 
@@ -35,7 +36,7 @@ def parse_args():
         help="the id of the environment")
     parser.add_argument("--total-timesteps", type=int, default=100000,
         help="total timesteps of the experiments")
-    parser.add_argument("--maximum-episode-length", type=int, default=100,
+    parser.add_argument("--maximum-episode-length", type=int, default=50,
         help="maximum length for episodes for gym POMDP environment")
     parser.add_argument("--buffer-size", type=int, default=int(1e5),
         help="the replay memory buffer size")
@@ -95,7 +96,8 @@ if __name__ == "__main__":
             resume="must",
             save_code=True,
             settings=wandb.Settings(code_dir="."),
-            mode="offline",
+            group=args.env_id,
+            # mode="offline",
         )
     else:
         wandb.init(
@@ -105,7 +107,8 @@ if __name__ == "__main__":
             name=run_name,
             save_code=True,
             settings=wandb.Settings(code_dir="."),
-            mode="offline",
+            group=args.env_id,
+            # mode="offline",
         )
 
     # Load checkpoint if resuming
@@ -130,28 +133,24 @@ if __name__ == "__main__":
             )
 
     # Env setup
-    envs = gym.vector.SyncVectorEnv(
-        [
-            make_env_gym_pomdp(
-                args.env_id,
-                args.seed,
-                0,
-                args.capture_video,
-                run_name,
-                max_episode_len=args.maximum_episode_length,
-            )
-        ]
+    env = make_env_gym_pomdp(
+        args.env_id,
+        args.seed,
+        0,
+        args.capture_video,
+        run_name,
+        max_episode_len=args.maximum_episode_length,
     )
     assert isinstance(
-        envs.single_action_space, gym.spaces.Discrete
+        env.action_space, gym.spaces.Discrete
     ), "only discrete action space is supported"
 
     # Initialize models and optimizers
-    actor = RecurrentDiscreteActorDiscreteObs(envs).to(device)
-    qf1 = RecurrentDiscreteCriticDiscreteObs(envs).to(device)
-    qf2 = RecurrentDiscreteCriticDiscreteObs(envs).to(device)
-    qf1_target = RecurrentDiscreteCriticDiscreteObs(envs).to(device)
-    qf2_target = RecurrentDiscreteCriticDiscreteObs(envs).to(device)
+    actor = RecurrentDiscreteActorDiscreteObs(env).to(device)
+    qf1 = RecurrentDiscreteCriticDiscreteObs(env).to(device)
+    qf2 = RecurrentDiscreteCriticDiscreteObs(env).to(device)
+    qf1_target = RecurrentDiscreteCriticDiscreteObs(env).to(device)
+    qf2_target = RecurrentDiscreteCriticDiscreteObs(env).to(device)
     qf1_target.load_state_dict(qf1.state_dict())
     qf2_target.load_state_dict(qf2.state_dict())
     q_optimizer = optim.Adam(
@@ -177,7 +176,7 @@ if __name__ == "__main__":
 
     # Automatic entropy tuning
     if args.autotune:
-        target_entropy = -0.3 * torch.log(1 / torch.tensor(envs.single_action_space.n))
+        target_entropy = -0.3 * torch.log(1 / torch.tensor(env.action_space.n))
         log_alpha = torch.zeros(1, requires_grad=True, device=device)
         a_optimizer = optim.Adam([log_alpha], lr=args.q_lr, eps=1e-4)
         # If resuming, load optimizer
@@ -191,11 +190,11 @@ if __name__ == "__main__":
         alpha = args.alpha
 
     # Initialize replay buffer
-    envs.single_observation_space.dtype = np.float32
+    env.observation_space.dtype = np.float32
     rb = ReplayBuffer(
         args.buffer_size,
-        envs.single_observation_space,
-        envs.single_action_space,
+        env.observation_space,
+        env.action_space,
         device,
         handle_timeout_termination=True,
     )
@@ -212,48 +211,49 @@ if __name__ == "__main__":
     # If resuming, update starting step
     if args.resume:
         start_global_step = checkpoint["global_step"] + 1
-    obs = envs.reset()
+
+    episodic_return = 0
+    episodic_length = 0
     hidden_in = None
+    obs = env.reset()
     for global_step in range(start_global_step, args.total_timesteps):
         # Store values for data logging for each global step
         data_log = {}
 
         # ALGO LOGIC: put action logic here
         if global_step < args.learning_starts:
-            actions = np.array(
-                [envs.single_action_space.sample() for _ in range(envs.num_envs)]
-            )
+            action = env.action_space.sample()
         else:
             seq_lengths = torch.LongTensor([1])
-            actions, _, _, hidden_out = actor.get_action(
-                torch.unsqueeze(torch.tensor(obs).to(device), 0), seq_lengths, hidden_in
+            action, _, _, hidden_out = actor.get_action(
+                torch.tensor(obs).to(device).view(1, -1), seq_lengths, hidden_in
             )
-            actions = torch.squeeze(actions, 0).detach().cpu().numpy()
+            action = action.view(-1).detach().cpu().numpy()[0]
             hidden_in = hidden_out
 
-        # Execute the game and log data
-        next_obs, rewards, dones, infos = envs.step(actions)
+        # Take step in environment
+        next_obs, reward, done, info = env.step(action)
 
-        # Record rewards for plotting purposes
-        for info in infos:
-            if "episode" in info.keys():
-                print(
-                    f"global_step={global_step}, episodic_return={info['episode']['r']}"
-                )
-                data_log["misc/episodic_return"] = info["episode"]["r"]
-                data_log["misc/episodic_length"] = info["episode"]["r"]
-                break
+        # Save data to replay buffer
+        rb.add(obs, next_obs, action, reward, done, info)
 
-        # Save data to reply buffer; handle `terminal_observation`
-        real_next_obs = next_obs.copy()
-        for idx, d in enumerate(dones):
-            if d:
-                real_next_obs[idx] = infos[idx]["terminal_observation"]
-                hidden_in = None
-        rb.add(obs, real_next_obs, actions, rewards, dones, infos)
+        # Update episodic reward and length
+        episodic_return += reward
+        episodic_length += 1
 
-        # CRUCIAL step easy to overlook
+        # Update next obs
         obs = next_obs
+
+        # Handle episode end, record rewards for plotting purposes
+        if done:
+            print(f"global_step={global_step}, episodic_return={episodic_return}")
+            data_log["misc/episodic_return"] = episodic_return
+            data_log["misc/episodic_length"] = episodic_length
+
+            episodic_return = 0
+            episodic_length = 0
+            hidden_in = None
+            obs = env.reset()
 
         # ALGO LOGIC: training
         if global_step > args.learning_starts:
@@ -329,7 +329,7 @@ if __name__ == "__main__":
                     min_qf_pi = torch.min(qf1_pi, qf2_pi)
                     # calculate eq. 7 in updated SAC paper
                     actor_loss_mask = torch.repeat_interleave(
-                        q_loss_mask, envs.single_action_space.n, 2
+                        q_loss_mask, env.action_space.n, 2
                     )
                     actor_loss_mask_nonzero_elements = torch.sum(actor_loss_mask)
                     actor_loss = state_action_probs * (
@@ -445,4 +445,4 @@ if __name__ == "__main__":
                     rng_states,
                 )
 
-    envs.close()
+    env.close()
