@@ -11,8 +11,7 @@ import torch.nn.functional as F
 import torch.optim as optim
 
 import wandb
-from models import (RecurrentDiscreteActorDiscreteObs,
-                    RecurrentDiscreteCriticDiscreteObs)
+from models import RecurrentDiscreteActorDiscreteObs, RecurrentDiscreteCriticDiscreteObs
 from replay_buffer import ReplayBuffer
 from utils import make_env_gym_pomdp, save, set_seed
 
@@ -28,13 +27,15 @@ def parse_args():
         help="if toggled, cuda will be enabled by default")
     parser.add_argument("--wandb-project-name", type=str, default="sac-discrete-obs-discrete-action-recurrent",
         help="the wandb's project name")
+    parser.add_argument("--wandb-dir", type=str, default="./",
+        help="the wandb's project name")
     parser.add_argument("--capture-video", type=lambda x: bool(strtobool(x)), default=False, nargs="?", const=True,
         help="whether to capture videos of the agent performances (check out `videos` folder)")
 
     # Algorithm specific arguments
     parser.add_argument("--env-id", type=str, default="POMDP-heavenhell_1-episodic-v0",
         help="the id of the environment")
-    parser.add_argument("--total-timesteps", type=int, default=100000,
+    parser.add_argument("--total-timesteps", type=int, default=100500,
         help="total timesteps of the experiments")
     parser.add_argument("--maximum-episode-length", type=int, default=50,
         help="maximum length for episodes for gym POMDP environment")
@@ -66,11 +67,13 @@ def parse_args():
     # Checkpointing specific arguments
     parser.add_argument("--save", type=lambda x:bool(strtobool(x)), default=True, nargs="?", const=True,
         help="checkpoint saving during training")
+    parser.add_argument("--save-checkpoint-dir", type=str, default="./trained_models/",
+        help="path to directory to save checkpoints in")
     parser.add_argument("--checkpoint-interval", type=int, default=5000,
         help="how often to save checkpoints during training (in timesteps)")
     parser.add_argument("--resume", type=lambda x: bool(strtobool(x)), default=False, nargs="?", const=True,
         help="whether to resume training from a checkpoint")
-    parser.add_argument("--checkpoint-path", type=str, default=None,
+    parser.add_argument("--resume-checkpoint-path", type=str, default="trained_models/POMDP-heavenhell_1-episodic-v0__sac_discrete_obs_discrete_action_recurrent__1__1674880703_3ahou5az/global_step_5000.pth",
         help="path to checkpoint to resume training from")
     parser.add_argument("--run-id", type=str, default=None,
         help="wandb unique run id for resuming")
@@ -90,6 +93,7 @@ if __name__ == "__main__":
     if args.resume and args.run_id is not None:
         wandb.init(
             id=args.run_id,
+            dir=args.wandb_dir,
             project=args.wandb_project_name,
             config=vars(args),
             name=run_name,
@@ -97,24 +101,25 @@ if __name__ == "__main__":
             save_code=True,
             settings=wandb.Settings(code_dir="."),
             group=args.env_id,
-            mode="offline",
+            # mode="offline",
         )
     else:
         wandb.init(
             id=run_id,
+            dir=args.wandb_dir,
             project=args.wandb_project_name,
             config=vars(args),
             name=run_name,
             save_code=True,
             settings=wandb.Settings(code_dir="."),
             group=args.env_id,
-            mode="offline",
+            # mode="offline",
         )
 
     # Load checkpoint if resuming
     if args.resume:
-        print("Resuming from checkpoint: " + args.checkpoint_path)
-        checkpoint = torch.load(args.checkpoint_path)
+        print("Resuming from checkpoint: " + args.resume_checkpoint_path)
+        checkpoint = torch.load(args.resume_checkpoint_path)
 
     # Set training device
     device = torch.device("cuda" if torch.cuda.is_available() and args.cuda else "cpu")
@@ -141,6 +146,15 @@ if __name__ == "__main__":
         run_name,
         max_episode_len=args.maximum_episode_length,
     )
+    # Set RNG state for env
+    if args.resume:
+        env.np_random.bit_generator.state = checkpoint["rng_states"]["env_rng_state"]
+        env.action_space.np_random.bit_generator.state = checkpoint["rng_states"][
+            "env_action_space_rng_state"
+        ]
+        env.observation_space.np_random.bit_generator.state = checkpoint["rng_states"][
+            "env_obs_space_rng_state"
+        ]
     assert isinstance(
         env.action_space, gym.spaces.Discrete
     ), "only discrete action space is supported"
@@ -428,6 +442,9 @@ if __name__ == "__main__":
                     "random_rng_state": random.getstate(),
                     "numpy_rng_state": np.random.get_state(),
                     "torch_rng_state": torch.get_rng_state(),
+                    "env_rng_state": env.np_random.bit_generator.state,
+                    "env_action_space_rng_state": env.action_space.np_random.bit_generator.state,
+                    "env_obs_space_rng_state": env.observation_space.np_random.bit_generator.state,
                 }
                 if device.type == "cuda":
                     rng_states["torch_cuda_rng_state"] = torch.cuda.get_rng_state()
@@ -438,6 +455,7 @@ if __name__ == "__main__":
                 save(
                     wandb.run.name,
                     run_id,
+                    args.save_checkpoint_dir,
                     global_step,
                     models,
                     optimizers,
