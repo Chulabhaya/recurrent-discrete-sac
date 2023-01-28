@@ -113,7 +113,7 @@ if __name__ == "__main__":
             save_code=True,
             settings=wandb.Settings(code_dir="."),
             group=args.env_id,
-            # mode="offline",
+            mode="offline",
         )
 
     # Load checkpoint if resuming
