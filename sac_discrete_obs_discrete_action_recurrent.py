@@ -28,7 +28,7 @@ def parse_args():
     parser.add_argument("--wandb-project-name", type=str, default="sac-discrete-obs-discrete-action-recurrent",
         help="the wandb's project name")
     parser.add_argument("--wandb-dir", type=str, default="./",
-        help="the wandb's project name")
+        help="the wandb directory")
     parser.add_argument("--capture-video", type=lambda x: bool(strtobool(x)), default=False, nargs="?", const=True,
         help="whether to capture videos of the agent performances (check out `videos` folder)")
 
