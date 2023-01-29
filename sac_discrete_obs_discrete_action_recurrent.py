@@ -116,16 +116,18 @@ if __name__ == "__main__":
             mode="offline",
         )
 
-    # Load checkpoint if resuming
-    if args.resume:
-        print("Resuming from checkpoint: " + args.resume_checkpoint_path)
-        checkpoint = torch.load(args.resume_checkpoint_path)
-
     # Set training device
     device = torch.device("cuda" if torch.cuda.is_available() and args.cuda else "cpu")
+    print("Running on the following device: " + device.type, flush=True)
 
     # Set seeding
     set_seed(args.seed, device)
+
+    # Load checkpoint if resuming
+    if args.resume:
+        print("Resuming from checkpoint: " + args.resume_checkpoint_path, flush=True)
+        checkpoint = torch.load(args.resume_checkpoint_path)
+
     # Set RNG state for seeds if resuming
     if args.resume:
         random.setstate(checkpoint["rng_states"]["random_rng_state"])
@@ -260,7 +262,7 @@ if __name__ == "__main__":
 
         # Handle episode end, record rewards for plotting purposes
         if done:
-            print(f"global_step={global_step}, episodic_return={episodic_return}")
+            print(f"global_step={global_step}, episodic_return={episodic_return}", flush=True)
             data_log["misc/episodic_return"] = episodic_return
             data_log["misc/episodic_length"] = episodic_length
 
@@ -410,7 +412,7 @@ if __name__ == "__main__":
                 data_log["misc/steps_per_second"] = int(
                     global_step / (time.time() - start_time)
                 )
-                print("SPS:", int(global_step / (time.time() - start_time)))
+                print("SPS:", int(global_step / (time.time() - start_time)), flush=True)
                 if args.autotune:
                     data_log["losses/alpha_loss"] = alpha_loss.item()
 
