@@ -96,8 +96,6 @@ def save(run_name, run_id, checkpoint_dir, global_step, models, optimizers, repl
 
 
 def set_seed(seed, device):
-    # For RNN reproducibility: https://pytorch.org/docs/stable/generated/torch.nn.LSTM.html#torch.nn.LSTM
-    os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"
     os.environ["PYTHONHASHSEED"] = str(seed)
     random.seed(seed)
     np.random.seed(seed)

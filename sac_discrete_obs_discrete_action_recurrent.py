@@ -262,7 +262,10 @@ if __name__ == "__main__":
 
         # Handle episode end, record rewards for plotting purposes
         if done:
-            print(f"global_step={global_step}, episodic_return={episodic_return}", flush=True)
+            print(
+                f"global_step={global_step}, episodic_return={episodic_return}",
+                flush=True,
+            )
             data_log["misc/episodic_return"] = episodic_return
             data_log["misc/episodic_length"] = episodic_length
 

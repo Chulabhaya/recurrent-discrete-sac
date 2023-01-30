@@ -27,6 +27,8 @@ def parse_args():
         help="if toggled, cuda will be enabled by default")
     parser.add_argument("--wandb-project-name", type=str, default="sac-continuous-action",
         help="the wandb's project name")
+    parser.add_argument("--wandb-dir", type=str, default="./",
+        help="the wandb directory")
     parser.add_argument("--capture-video", type=lambda x: bool(strtobool(x)), default=False, nargs="?", const=True,
         help="whether to capture videos of the agent performances (check out `videos` folder)")
 
@@ -61,11 +63,13 @@ def parse_args():
     # Checkpointing specific arguments
     parser.add_argument("--save", type=lambda x:bool(strtobool(x)), default=True, nargs="?", const=True,
         help="checkpoint saving during training")
+    parser.add_argument("--save-checkpoint-dir", type=str, default="./trained_models/",
+        help="path to directory to save checkpoints in")
     parser.add_argument("--checkpoint-interval", type=int, default=5000,
         help="how often to save checkpoints during training (in timesteps)")
     parser.add_argument("--resume", type=lambda x: bool(strtobool(x)), default=False, nargs="?", const=True,
         help="whether to resume training from a checkpoint")
-    parser.add_argument("--checkpoint-path", type=str, default=None,
+    parser.add_argument("--resume-checkpoint-path", type=str, default=None,
         help="path to checkpoint to resume training from")
     parser.add_argument("--run-id", type=str, default=None,
         help="wandb unique run id for resuming")
@@ -85,6 +89,7 @@ if __name__ == "__main__":
     if args.resume and args.run_id is not None:
         wandb.init(
             id=args.run_id,
+            dir=args.wandb_dir,
             project=args.wandb_project_name,
             config=vars(args),
             name=run_name,
@@ -97,6 +102,7 @@ if __name__ == "__main__":
     else:
         wandb.init(
             id=run_id,
+            dir=args.wandb_dir,
             project=args.wandb_project_name,
             config=vars(args),
             name=run_name,
@@ -106,16 +112,18 @@ if __name__ == "__main__":
             group=args.env_id,
         )
 
-    # Load checkpoint if resuming
-    if args.resume:
-        print("Resuming from checkpoint: " + args.checkpoint_path)
-        checkpoint = torch.load(args.checkpoint_path)
-
     # Set training device
     device = torch.device("cuda" if torch.cuda.is_available() and args.cuda else "cpu")
+    print("Running on the following device: " + device.type, flush=True)
 
     # Set seeding
     set_seed(args.seed, device)
+
+    # Load checkpoint if resuming
+    if args.resume:
+        print("Resuming from checkpoint: " + args.resume_checkpoint_path, flush=True)
+        checkpoint = torch.load(args.resume_checkpoint_path)
+
     # Set RNG state for seeds if resuming
     if args.resume:
         random.setstate(checkpoint["rng_states"]["random_rng_state"])
@@ -129,6 +137,15 @@ if __name__ == "__main__":
 
     # Env setup
     env = make_env(args.env_id, args.seed, 0, args.capture_video, run_name)
+    # Set RNG state for env
+    if args.resume:
+        env.np_random.bit_generator.state = checkpoint["rng_states"]["env_rng_state"]
+        env.action_space.np_random.bit_generator.state = checkpoint["rng_states"][
+            "env_action_space_rng_state"
+        ]
+        env.observation_space.np_random.bit_generator.state = checkpoint["rng_states"][
+            "env_obs_space_rng_state"
+        ]
     assert isinstance(
         env.action_space, gym.spaces.Box
     ), "only continuous action space is supported"
@@ -235,7 +252,7 @@ if __name__ == "__main__":
 
         # Handle episode end, record rewards for plotting purposes
         if done:
-            print(f"global_step={global_step}, episodic_return={episodic_return}")
+            print(f"global_step={global_step}, episodic_return={episodic_return}", flush=True)
             data_log["misc/episodic_return"] = episodic_return
             data_log["misc/episodic_length"] = episodic_length
 
@@ -333,7 +350,7 @@ if __name__ == "__main__":
                 data_log["misc/steps_per_second"] = int(
                     global_step / (time.time() - start_time)
                 )
-                print("SPS:", int(global_step / (time.time() - start_time)))
+                print("SPS:", int(global_step / (time.time() - start_time)), flush=True)
                 if args.autotune:
                     data_log["losses/alpha_loss"] = alpha_loss.item()
 
@@ -365,6 +382,9 @@ if __name__ == "__main__":
                     "random_rng_state": random.getstate(),
                     "numpy_rng_state": np.random.get_state(),
                     "torch_rng_state": torch.get_rng_state(),
+                    "env_rng_state": env.np_random.bit_generator.state,
+                    "env_action_space_rng_state": env.action_space.np_random.bit_generator.state,
+                    "env_obs_space_rng_state": env.observation_space.np_random.bit_generator.state,
                 }
                 if device.type == "cuda":
                     rng_states["torch_cuda_rng_state"] = torch.cuda.get_rng_state()
@@ -375,6 +395,7 @@ if __name__ == "__main__":
                 save(
                     wandb.run.name,
                     run_id,
+                    args.save_checkpoint_dir,
                     global_step,
                     models,
                     optimizers,
