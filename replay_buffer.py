@@ -78,22 +78,6 @@ class ReplayBuffer:
             self.full = True
             self.pos = 0
 
-    def add_dataset(self, obs, next_obs, actions, rewards, dones, timeouts):
-        self.obs = np.reshape(obs.copy(), self.obs.shape).astype(
-            dtype=self.obs_space.dtype
-        )
-        self.next_obs = np.reshape(next_obs.copy(), self.next_obs.shape).astype(
-            dtype=self.obs_space.dtype
-        )
-        self.actions = np.reshape(actions.copy(), self.actions.shape).astype(
-            dtype=self.action_space.dtype
-        )
-        self.rewards = rewards.copy().astype(dtype=np.float32)
-        self.dones = dones.copy().astype(dtype=np.float32)
-        self.timeouts = timeouts.copy().astype(dtype=np.float32)
-
-        self.full = True
-
     def sample(self, batch_size):
         upper_bound = self.buffer_size if self.full else self.pos
         batch_inds = np.random.randint(0, upper_bound, size=batch_size)
