@@ -4,6 +4,7 @@ import os
 import random
 import time
 from distutils.util import strtobool
+import pickle
 
 import gym
 import numpy as np
@@ -12,8 +13,7 @@ import torch.nn.functional as F
 import torch.optim as optim
 
 import wandb
-from models import (RecurrentDiscreteActorDiscreteObs,
-                    RecurrentDiscreteCriticDiscreteObs)
+from models import RecurrentDiscreteActorDiscreteObs, RecurrentDiscreteCriticDiscreteObs
 from replay_buffer import ReplayBuffer
 from utils import make_env_gym_pomdp, set_seed, save
 
@@ -29,6 +29,8 @@ def parse_args():
         help="if toggled, cuda will be enabled by default")
     parser.add_argument("--wandb-project-name", type=str, default="sac-discrete-obs-discrete-action-recurrent-offline",
         help="the wandb's project name")
+    parser.add_argument("--wandb-dir", type=str, default="./",
+        help="the wandb directory")
     parser.add_argument("--capture-video", type=lambda x: bool(strtobool(x)), default=False, nargs="?", const=True,
         help="whether to capture videos of the agent performances (check out `videos` folder)")
 
@@ -37,6 +39,8 @@ def parse_args():
         help="the id of the environment")
     parser.add_argument("--total-timesteps", type=int, default=100000,
         help="total timesteps of the experiments")
+    parser.add_argument("--maximum-episode-length", type=int, default=50,
+        help="maximum length for episodes for gym POMDP environment")
     parser.add_argument("--gamma", type=float, default=0.99,
         help="the discount factor gamma")
     parser.add_argument("--tau", type=float, default=0.005,
@@ -57,104 +61,182 @@ def parse_args():
             help="Entropy regularization coefficient.")
     parser.add_argument("--autotune", type=lambda x:bool(strtobool(x)), default=True, nargs="?", const=True,
         help="automatic tuning of the entropy coefficient")
+
+    # Offline training specific arguments
+    parser.add_argument("--dataset-path", type=str, default="heavenhell_1_expert_data.pkl",
+        help="path to dataset for training")
+    parser.add_argument("--num-evals", type=int, default=10,
+        help="number of evaluation episodes to generate per evaluation during training")
+
+    # Checkpointing specific arguments
+    parser.add_argument("--save", type=lambda x:bool(strtobool(x)), default=True, nargs="?", const=True,
+        help="checkpoint saving during training")
+    parser.add_argument("--save-checkpoint-dir", type=str, default="./trained_models/",
+        help="path to directory to save checkpoints in")
+    parser.add_argument("--checkpoint-interval", type=int, default=5000,
+        help="how often to save checkpoints during training (in timesteps)")
+    parser.add_argument("--resume", type=lambda x: bool(strtobool(x)), default=False, nargs="?", const=True,
+        help="whether to resume training from a checkpoint")
+    parser.add_argument("--resume-checkpoint-path", type=str, default="trained_models/POMDP-heavenhell_1-episodic-v0__sac_discrete_obs_discrete_action_recurrent__1__1674880703_3ahou5az/global_step_5000.pth",
+        help="path to checkpoint to resume training from")
+    parser.add_argument("--run-id", type=str, default=None,
+        help="wandb unique run id for resuming")
+
     args = parser.parse_args()
     # fmt: on
     return args
 
 
 def eval_policy(
-    actor, env_name, seed, seed_offset, global_step, capture_video, run_name, data_log
+    actor,
+    env_name,
+    seed,
+    seed_offset,
+    global_step,
+    capture_video,
+    run_name,
+    max_episode_len,
+    num_evals,
+    data_log,
 ):
+    # Put actor model in evaluation mode
+    actor.eval()
+
     with torch.no_grad():
         # Initialization
         run_name_full = run_name + "__eval__" + str(global_step)
-        envs = gym.vector.SyncVectorEnv(
-            [make_env_gym_pomdp(env_name, seed + seed_offset, 0, capture_video, run_name_full)]
+        env = make_env_gym_pomdp(
+            env_name,
+            seed + seed_offset,
+            0,
+            capture_video,
+            run_name_full,
+            max_episode_len=max_episode_len,
         )
 
-        done = False
-        obs = envs.reset()
-        hidden_in = None
-
-        # TODO: Run a series of 10 evaluations each time this function is called and
-        # average the results for returning back
-
+        avg_episodic_return = 0
+        avg_episodic_length = 0
         # Start evaluation
-        timestep = 0
-        while not done:
-            # Get action
-            seq_lengths = torch.LongTensor([1])
-            actions, _, _, hidden_out = actor.get_action(
-                torch.unsqueeze(torch.tensor(obs).to(device), 0), seq_lengths, hidden_in
-            )
-            actions = torch.squeeze(actions, 0).detach().cpu().numpy()
-            hidden_in = hidden_out
-
-            # Step through environment
-            next_obs, rewards, dones, infos = envs.step(actions)
-
-            print(
-                "Obs: {}, Action: {}, Next Obs: {}, Reward: {}, Dones: {}".format(
-                    obs, actions, next_obs, rewards, dones
+        for _ in range(num_evals):
+            done = False
+            obs = env.reset()
+            hidden_in = None
+            while not done:
+                # Get action
+                seq_lengths = torch.LongTensor([1])
+                action, _, _, hidden_out = actor.get_action(
+                    torch.tensor(obs).to(device).view(1, -1), seq_lengths, hidden_in
                 )
-            )
+                action = action.view(-1).detach().cpu().numpy()[0]
+                hidden_in = hidden_out
 
-            # Plotting returns
-            for info in infos:
-                if "episode" in info.keys():
-                    print(
-                        f"global_step={global_step}, eval_episodic_return={info['episode']['r']}"
-                    )
-                    data_log["misc/eval_episodic_return"] = info["episode"]["r"]
-                    data_log["misc/eval_episodic_length"] = info["episode"]["r"]
-                    break
+                # Take step in environment
+                next_obs, reward, done, info = env.step(action)
 
-            # Check for termination
-            for idx, done in enumerate(dones):
-                if done:
-                    break
-                else:
-                    timestep += 1
-                    obs = next_obs
-                    print(timestep)
+                # Update episodic reward and length
+                avg_episodic_return += reward
+                avg_episodic_length += 1
+
+                # Update next obs
+                obs = next_obs
+
+        avg_episodic_return /= num_evals
+        avg_episodic_length /= num_evals
+        print(
+            f"global_step={global_step}, episodic_return={avg_episodic_return}",
+            flush=True,
+        )
+        data_log["misc/episodic_return"] = avg_episodic_return
+        data_log["misc/episodic_length"] = avg_episodic_length
+
+    # Put actor model back in training mode
+    actor.train()
 
 
 if __name__ == "__main__":
     args = parse_args()
     run_name = f"{args.env_id}__{args.exp_name}__{args.seed}__{int(time.time())}"
+    run_id = wandb.util.generate_id()
 
-    wandb.init(
-        project=args.wandb_project_name,
-        sync_tensorboard=True,
-        config=vars(args),
-        name=run_name,
-        monitor_gym=True,
-        save_code=True,
-    )
-
-    # TRY NOT TO MODIFY: seeding
-    random.seed(args.seed)
-    np.random.seed(args.seed)
-    torch.manual_seed(args.seed)
-    torch.backends.cudnn.deterministic = args.torch_deterministic
+    # If a unique wandb run id is given, then resume from that, otherwise
+    # generate new run for resuming
+    if args.resume and args.run_id is not None:
+        wandb.init(
+            id=args.run_id,
+            dir=args.wandb_dir,
+            project=args.wandb_project_name,
+            config=vars(args),
+            name=run_name,
+            resume="must",
+            save_code=True,
+            settings=wandb.Settings(code_dir="."),
+            group=args.env_id,
+            mode="offline",
+        )
+    else:
+        wandb.init(
+            id=run_id,
+            dir=args.wandb_dir,
+            project=args.wandb_project_name,
+            config=vars(args),
+            name=run_name,
+            save_code=True,
+            settings=wandb.Settings(code_dir="."),
+            group=args.env_id,
+            mode="offline",
+        )
 
     # Set training device
     device = torch.device("cuda" if torch.cuda.is_available() and args.cuda else "cpu")
+    print("Running on the following device: " + device.type, flush=True)
+
+    # Set seeding
+    set_seed(args.seed, device)
+
+    # Load checkpoint if resuming
+    if args.resume:
+        print("Resuming from checkpoint: " + args.resume_checkpoint_path, flush=True)
+        checkpoint = torch.load(args.resume_checkpoint_path)
+
+    # Set RNG state for seeds if resuming
+    if args.resume:
+        random.setstate(checkpoint["rng_states"]["random_rng_state"])
+        np.random.set_state(checkpoint["rng_states"]["numpy_rng_state"])
+        torch.set_rng_state(checkpoint["rng_states"]["torch_rng_state"])
+        if device.type == "cuda":
+            torch.cuda.set_rng_state(checkpoint["rng_states"]["torch_cuda_rng_state"])
+            torch.cuda.set_rng_state_all(
+                checkpoint["rng_states"]["torch_cuda_rng_state_all"]
+            )
 
     # Env setup
-    envs = gym.vector.SyncVectorEnv(
-        [make_env_gym_pomdp(args.env_id, args.seed, 0, args.capture_video, run_name)]
+    env = make_env_gym_pomdp(
+        args.env_id,
+        args.seed,
+        0,
+        args.capture_video,
+        run_name,
+        max_episode_len=args.maximum_episode_length,
     )
+    # Set RNG state for env
+    if args.resume:
+        env.np_random.bit_generator.state = checkpoint["rng_states"]["env_rng_state"]
+        env.action_space.np_random.bit_generator.state = checkpoint["rng_states"][
+            "env_action_space_rng_state"
+        ]
+        env.observation_space.np_random.bit_generator.state = checkpoint["rng_states"][
+            "env_obs_space_rng_state"
+        ]
     assert isinstance(
-        envs.single_action_space, gym.spaces.Discrete
+        env.action_space, gym.spaces.Discrete
     ), "only discrete action space is supported"
 
     # Initialize models and optimizers
-    actor = RecurrentDiscreteActorDiscreteObs(envs).to(device)
-    qf1 = RecurrentDiscreteCriticDiscreteObs(envs).to(device)
-    qf2 = RecurrentDiscreteCriticDiscreteObs(envs).to(device)
-    qf1_target = RecurrentDiscreteCriticDiscreteObs(envs).to(device)
-    qf2_target = RecurrentDiscreteCriticDiscreteObs(envs).to(device)
+    actor = RecurrentDiscreteActorDiscreteObs(env).to(device)
+    qf1 = RecurrentDiscreteCriticDiscreteObs(env).to(device)
+    qf2 = RecurrentDiscreteCriticDiscreteObs(env).to(device)
+    qf1_target = RecurrentDiscreteCriticDiscreteObs(env).to(device)
+    qf2_target = RecurrentDiscreteCriticDiscreteObs(env).to(device)
     qf1_target.load_state_dict(qf1.state_dict())
     qf2_target.load_state_dict(qf2.state_dict())
     q_optimizer = optim.Adam(
@@ -162,49 +244,65 @@ if __name__ == "__main__":
     )
     actor_optimizer = optim.Adam(list(actor.parameters()), lr=args.policy_lr)
 
+    # If resuming training, load models and optimizers
+    if args.resume:
+        actor.load_state_dict(checkpoint["model_state_dict"]["actor_state_dict"])
+        qf1.load_state_dict(checkpoint["model_state_dict"]["qf1_state_dict"])
+        qf2.load_state_dict(checkpoint["model_state_dict"]["qf2_state_dict"])
+        qf1_target.load_state_dict(
+            checkpoint["model_state_dict"]["qf1_target_state_dict"]
+        )
+        qf2_target.load_state_dict(
+            checkpoint["model_state_dict"]["qf2_target_state_dict"]
+        )
+        q_optimizer.load_state_dict(checkpoint["optimizer_state_dict"]["q_optimizer"])
+        actor_optimizer.load_state_dict(
+            checkpoint["optimizer_state_dict"]["actor_optimizer"]
+        )
+
     # Automatic entropy tuning
     if args.autotune:
-        target_entropy = -0.3 * torch.log(1 / torch.tensor(envs.single_action_space.n))
+        target_entropy = -0.3 * torch.log(1 / torch.tensor(env.action_space.n))
         log_alpha = torch.zeros(1, requires_grad=True, device=device)
-        alpha = log_alpha.exp().item()
         a_optimizer = optim.Adam([log_alpha], lr=args.q_lr, eps=1e-4)
+        # If resuming, load optimizer
+        if args.resume:
+            a_optimizer.load_state_dict(
+                checkpoint["optimizer_state_dict"]["a_optimizer"]
+            )
+
+        alpha = log_alpha.exp().item()
     else:
         alpha = args.alpha
 
     # Load dataset
-    dataset = np.load("heavenhell_1_1000_episode_dataset_random_100percent.npz")
-    dataset_obs = dataset["observations"]
-    dataset_actions = dataset["actions"]
-    dataset_next_obs = dataset["next_observations"]
-    dataset_dones = dataset["dones"]
-    dataset_rewards = dataset["rewards"]
-    dataset_timeouts = dataset["timeouts"]
-    buffer_size = dataset_obs.size
+    dataset = pickle.load(open(args.dataset_path, "rb"))
 
-    envs.single_observation_space.dtype = np.float32
+    # Initialize replay buffer
+    env.observation_space.dtype = np.float32
     rb = ReplayBuffer(
-        buffer_size,
-        envs.single_observation_space,
-        envs.single_action_space,
+        dataset["obs"].shape[0],
+        env.observation_space,
+        env.action_space,
         device,
         handle_timeout_termination=True,
     )
-    rb.add_dataset(
-        dataset_obs,
-        dataset_next_obs,
-        dataset_actions,
-        dataset_rewards,
-        dataset_dones,
-        dataset_timeouts,
-    )
+    rb.load_buffer(dataset)
+
+    # Start time tracking for run
     start_time = time.time()
 
+    # Start the game
+    start_global_step = 0
+    # If resuming, update starting step
+    if args.resume:
+        start_global_step = checkpoint["global_step"] + 1
     # ALGO LOGIC: training and evaluation
-    for global_step in range(args.total_timesteps):
+    for global_step in range(start_global_step, args.total_timesteps):
         # Store values for data logging for each global step
         data_log = {}
 
-        # sample data from replay buffer
+        # Sample data from replay buffer
         (
             observations,
             actions,
@@ -259,8 +357,6 @@ if __name__ == "__main__":
         # calculate eq. 6 in updated SAC paper
         q_optimizer.zero_grad()
         qf_loss.backward()
-        # clip_grad_norm_(qf1.parameters(), 1)
-        # clip_grad_norm_(qf2.parameters(), 1)
         q_optimizer.step()
 
         # ---------- update actor ---------- #
@@ -275,7 +371,9 @@ if __name__ == "__main__":
                 qf2_pi = qf2(observations, seq_lengths)
                 min_qf_pi = torch.min(qf1_pi, qf2_pi)
                 # calculate eq. 7 in updated SAC paper
-                actor_loss_mask = torch.repeat_interleave(q_loss_mask, envs.single_action_space.n, 2)
+                actor_loss_mask = torch.repeat_interleave(
+                    q_loss_mask, env.action_space.n, 2
+                )
                 actor_loss_mask_nonzero_elements = torch.sum(actor_loss_mask)
                 actor_loss = state_action_probs * (
                     (alpha * state_action_log_pis) - min_qf_pi
@@ -337,7 +435,7 @@ if __name__ == "__main__":
             data_log["misc/steps_per_second"] = int(
                 global_step / (time.time() - start_time)
             )
-            print("SPS:", int(global_step / (time.time() - start_time)))
+            print("SPS:", int(global_step / (time.time() - start_time)), flush=True)
             if args.autotune:
                 data_log["losses/alpha_loss"] = alpha_loss.item()
 
@@ -346,14 +444,62 @@ if __name__ == "__main__":
                 actor,
                 args.env_id,
                 args.seed,
-                100,
+                10000,
                 global_step,
                 args.capture_video,
                 run_name,
+                args.maximum_episode_length,
+                args.num_evals,
                 data_log,
             )
 
         data_log["misc/global_step"] = global_step
-        wandb.log(data_log)
+        wandb.log(data_log, step=global_step)
 
-    envs.close()
+        # Save checkpoints during training
+        if args.save:
+            if global_step % args.checkpoint_interval == 0:
+                # Save models
+                models = {
+                    "actor_state_dict": actor.state_dict(),
+                    "qf1_state_dict": qf1.state_dict(),
+                    "qf2_state_dict": qf2.state_dict(),
+                    "qf1_target_state_dict": qf1_target.state_dict(),
+                    "qf2_target_state_dict": qf2_target.state_dict(),
+                }
+                # Save optimizers
+                optimizers = {
+                    "q_optimizer": q_optimizer.state_dict(),
+                    "actor_optimizer": actor_optimizer.state_dict(),
+                }
+                if args.autotune:
+                    optimizers["a_optimizer"] = a_optimizer.state_dict()
+                # Save replay buffer
+                rb_data = {}
+                # Save random states, important for reproducibility
+                rng_states = {
+                    "random_rng_state": random.getstate(),
+                    "numpy_rng_state": np.random.get_state(),
+                    "torch_rng_state": torch.get_rng_state(),
+                    "env_rng_state": env.np_random.bit_generator.state,
+                    "env_action_space_rng_state": env.action_space.np_random.bit_generator.state,
+                    "env_obs_space_rng_state": env.observation_space.np_random.bit_generator.state,
+                }
+                if device.type == "cuda":
+                    rng_states["torch_cuda_rng_state"] = torch.cuda.get_rng_state()
+                    rng_states[
+                        "torch_cuda_rng_state_all"
+                    ] = torch.cuda.get_rng_state_all()
+
+                save(
+                    wandb.run.name,
+                    run_id,
+                    args.save_checkpoint_dir,
+                    global_step,
+                    models,
+                    optimizers,
+                    rb_data,
+                    rng_states,
+                )
+
+    env.close()

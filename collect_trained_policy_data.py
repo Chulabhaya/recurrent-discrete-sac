@@ -81,7 +81,7 @@ def parse_args():
         help="maximum length for episodes for gym POMDP environment")
     parser.add_argument("--total-timesteps", type=int, default=10000,
         help="total timesteps of data to gather from policy")
-    parser.add_argument("--checkpoint", type=str, default="trained_models/POMDP-heavenhell_1-episodic-v0__laptop_seed1_run1_cudnn_on__1__1675040882_3d0707f5/global_step_100000.pth",
+    parser.add_argument("--checkpoint", type=str, default="trained_models/POMDP-heavenhell_1-episodic-v0__laptop_seed1_run1_cudnn_on__1__1675040882_3d0707f5/global_step_40000.pth",
         help="path to checkpoint with trained policy")
 
     args = parser.parse_args()
@@ -124,8 +124,7 @@ def main():
     rb_data = rb.save_buffer()
 
     # Save out dictionary into pickle file
-    # create a binary pickle file
-    f = open("test_data.pkl", "wb")
+    f = open("heavenhell_1_low_data.pkl", "wb")
     pickle.dump(rb_data, f)
     f.close()
 
