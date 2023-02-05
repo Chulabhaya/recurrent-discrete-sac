@@ -85,7 +85,7 @@ def parse_args():
 
 if __name__ == "__main__":
     args = parse_args()
-    run_name = f"{args.env_id}__{args.exp_name}__{args.seed}__{int(time.time())}"
+    run_name = f"{args.env_id}__{args.exp_name}"
     run_id = wandb.util.generate_id()
 
     # If a unique wandb run id is given, then resume from that, otherwise

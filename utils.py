@@ -77,7 +77,7 @@ def make_env_gym_pomdp(env_id, seed, idx, capture_video, run_name, max_episode_l
 def save(run_name, run_id, checkpoint_dir, global_step, models, optimizers, replay_buffer, rng_states):
     import os
 
-    save_dir = checkpoint_dir + run_name + "_" + run_id + "/"
+    save_dir = checkpoint_dir + run_name + "__" + run_id + "/"
 
     if not os.path.exists(save_dir):
         os.makedirs(save_dir)
