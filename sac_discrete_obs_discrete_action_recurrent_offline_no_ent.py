@@ -354,7 +354,7 @@ if __name__ == "__main__":
                     q_loss_mask, env.action_space.n, 2
                 )
                 actor_loss_mask_nonzero_elements = torch.sum(actor_loss_mask)
-                actor_loss = state_action_probs * (min_qf_pi)
+                actor_loss = state_action_probs * (-min_qf_pi)
                 actor_loss = (
                     torch.sum(actor_loss * actor_loss_mask)
                     / actor_loss_mask_nonzero_elements
