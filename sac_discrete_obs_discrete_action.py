@@ -11,9 +11,9 @@ import torch.nn.functional as F
 import torch.optim as optim
 
 import wandb
-from models import DiscreteActorDiscreteObs, DiscreteCriticDiscreteObs
-from replay_buffer import ReplayBuffer
-from utils import make_env_gym_pomdp, save, set_seed
+from common.models import DiscreteActorDiscreteObs, DiscreteCriticDiscreteObs
+from common.replay_buffer import ReplayBuffer
+from common.utils import make_env_gym_pomdp, save, set_seed
 
 
 def parse_args():
@@ -311,9 +311,13 @@ if __name__ == "__main__":
                     _, state_action_probs, state_action_log_pis = actor.evaluate(
                         observations
                     )
-                    qf1_pi = qf1(observations)
-                    qf2_pi = qf2(observations)
-                    min_qf_pi = torch.min(qf1_pi, qf2_pi)
+
+                    # no grad because q-networks are updated separately
+                    with torch.no_grad():
+                        qf1_pi = qf1(observations)
+                        qf2_pi = qf2(observations)
+                        min_qf_pi = torch.min(qf1_pi, qf2_pi)
+
                     # calculate eq. 7 in updated SAC paper
                     actor_loss = (
                         (
@@ -331,6 +335,7 @@ if __name__ == "__main__":
 
                     # ---------- update alpha ---------- #
                     if args.autotune:
+                        # no grad because actor network is updated separately
                         with torch.no_grad():
                             (
                                 _,

@@ -11,9 +11,9 @@ import torch.nn.functional as F
 import torch.optim as optim
 
 import wandb
-from models import ContinuousActor, ContinuousCritic
-from replay_buffer import ReplayBuffer
-from utils import make_env, save, set_seed
+from common.models import ContinuousActor, ContinuousCritic
+from common.replay_buffer import ReplayBuffer
+from common.utils import make_env, save, set_seed
 
 
 def parse_args():
@@ -300,9 +300,13 @@ if __name__ == "__main__":
                     args.policy_frequency
                 ):  # compensate for the delay by doing 'actor_update_interval' instead of 1
                     pi, log_pi, _ = actor.get_action(data.observations)
-                    qf1_pi = qf1(data.observations, pi)
-                    qf2_pi = qf2(data.observations, pi)
-                    min_qf_pi = torch.min(qf1_pi, qf2_pi).view(-1)
+
+                    # no grad because q-networks are updated separately
+                    with torch.no_grad():
+                        qf1_pi = qf1(data.observations, pi)
+                        qf2_pi = qf2(data.observations, pi)
+                        min_qf_pi = torch.min(qf1_pi, qf2_pi).view(-1)
+
                     # calculate eq. 7 in updated SAC paper
                     actor_loss = ((alpha * log_pi) - min_qf_pi).mean()
 
@@ -312,6 +316,7 @@ if __name__ == "__main__":
                     actor_optimizer.step()
 
                     if args.autotune:
+                        # no grad because actor network is updated separately
                         with torch.no_grad():
                             _, log_pi, _ = actor.get_action(data.observations)
                         # calculate eq. 18 in updated SAC paper

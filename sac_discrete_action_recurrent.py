@@ -11,9 +11,9 @@ import torch.nn.functional as F
 import torch.optim as optim
 
 import wandb
-from models import RecurrentDiscreteActor, RecurrentDiscreteCritic
-from replay_buffer import ReplayBuffer
-from utils import make_env, set_seed, save
+from common.models import RecurrentDiscreteActor, RecurrentDiscreteCritic
+from common.replay_buffer import ReplayBuffer
+from common.utils import make_env, set_seed, save
 
 
 def parse_args():
