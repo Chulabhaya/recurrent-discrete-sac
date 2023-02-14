@@ -1,4 +1,3 @@
-# docs and experiment results can be found at https://docs.cleanrl.dev/rl-algorithms/sac/#sac_continuous_actionpy
 import argparse
 import os
 import random
@@ -6,7 +5,7 @@ import time
 from distutils.util import strtobool
 import pickle
 
-import gym
+import gymnasium as gym
 import numpy as np
 import torch
 import torch.nn.functional as F
@@ -108,20 +107,19 @@ def eval_policy(
         env = make_env_gym_pomdp(
             env_name,
             seed + seed_offset,
-            0,
             capture_video,
             run_name_full,
             max_episode_len=max_episode_len,
         )
-
+        # Track averages
         avg_episodic_return = 0
         avg_episodic_length = 0
         # Start evaluation
         for _ in range(num_evals):
-            done = False
-            obs = env.reset()
+            terminated, truncated = False, False
+            obs, info = env.reset(seed=seed + seed_offset)
             hidden_in = None
-            while not done:
+            while not (truncated or terminated):
                 # Get action
                 seq_lengths = torch.LongTensor([1])
                 action, _, _, hidden_out = actor.get_action(
@@ -131,19 +129,17 @@ def eval_policy(
                 hidden_in = hidden_out
 
                 # Take step in environment
-                next_obs, reward, done, info = env.step(action)
-
-                # Update episodic reward and length
-                avg_episodic_return += reward
-                avg_episodic_length += 1
+                next_obs, reward, terminated, truncated, info = env.step(action)
 
                 # Update next obs
                 obs = next_obs
-
+            avg_episodic_return += info["episode"]["r"][0]
+            avg_episodic_length += info["episode"]["l"][0]
+        # Update averages
         avg_episodic_return /= num_evals
         avg_episodic_length /= num_evals
         print(
-            f"global_step={global_step}, episodic_return={avg_episodic_return}",
+            f"global_step={global_step}, episodic_return={avg_episodic_return}, episodic_length={avg_episodic_length}",
             flush=True,
         )
         data_log["misc/episodic_return"] = avg_episodic_return
@@ -213,7 +209,6 @@ if __name__ == "__main__":
     env = make_env_gym_pomdp(
         args.env_id,
         args.seed,
-        0,
         args.capture_video,
         run_name,
         max_episode_len=args.maximum_episode_length,
@@ -285,7 +280,6 @@ if __name__ == "__main__":
         env.observation_space,
         env.action_space,
         device,
-        handle_timeout_termination=True,
     )
     rb.load_buffer(dataset)
 
@@ -307,8 +301,8 @@ if __name__ == "__main__":
             observations,
             actions,
             next_observations,
-            dones,
             rewards,
+            terminateds,
             seq_lengths,
         ) = rb.sample_history(args.batch_size)
         observations = observations.squeeze(2).long()
@@ -330,7 +324,7 @@ if __name__ == "__main__":
             )
             # calculate eq. 2 in updated SAC paper
             next_q_value = rewards + (
-                (1 - dones) * args.gamma * qf_next_target.sum(dim=2).unsqueeze(-1)
+                (1 - terminateds) * args.gamma * qf_next_target.sum(dim=2).unsqueeze(-1)
             )
 
         # calculate eq. 5 in updated SAC paper

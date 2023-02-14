@@ -1,13 +1,13 @@
 import os
 import random
 
-import gym
+import gymnasium as gym
 import numpy as np
 import torch
-from gym_pomdps.wrappers.resetobservation import ResetObservationWrapper
+# from gym_pomdps.wrappers.resetobservation import ResetObservationWrapper
 
 
-def make_env(env_id, seed, idx, capture_video, run_name):
+def make_env(env_id, seed, capture_video, run_name):
     """Generates seeded environment.
 
     Parameters
@@ -31,15 +31,13 @@ def make_env(env_id, seed, idx, capture_video, run_name):
     env = gym.make(env_id)
     env = gym.wrappers.RecordEpisodeStatistics(env)
     if capture_video:
-        if idx == 0:
-            env = gym.wrappers.RecordVideo(env, f"videos/{run_name}")
-    env.seed(seed)
+        env = gym.wrappers.RecordVideo(env, f"videos/{run_name}")
     env.action_space.seed(seed)
     env.observation_space.seed(seed)
     return env
 
 
-def make_env_gym_pomdp(env_id, seed, idx, capture_video, run_name, max_episode_len):
+def make_env_gym_pomdp(env_id, seed, capture_video, run_name, max_episode_len):
     """Generates seeded environment for discrete Gym POMDPs that need
     additional env wrappers.
 
@@ -49,8 +47,6 @@ def make_env_gym_pomdp(env_id, seed, idx, capture_video, run_name, max_episode_l
         Name of Gym environment.
     seed : int
         Seed.
-    idx : int
-        Whether to record videos or not.
     capture_video : boolean
         Whether to record videos or not.
     run_name : string
@@ -66,9 +62,7 @@ def make_env_gym_pomdp(env_id, seed, idx, capture_video, run_name, max_episode_l
     )
     env = gym.wrappers.RecordEpisodeStatistics(env)
     if capture_video:
-        if idx == 0:
-            env = gym.wrappers.RecordVideo(env, f"videos/{run_name}")
-    env.seed(seed)
+        env = gym.wrappers.RecordVideo(env, f"videos/{run_name}")
     env.action_space.seed(seed)
     env.observation_space.seed(seed)
     return env

@@ -4,7 +4,7 @@ import random
 import time
 from distutils.util import strtobool
 
-import gym
+import gymnasium as gym
 import numpy as np
 import torch
 import torch.nn.functional as F
@@ -136,16 +136,7 @@ if __name__ == "__main__":
             )
 
     # Env setup
-    env = make_env(args.env_id, args.seed, 0, args.capture_video, run_name)
-    # Set RNG state for env
-    if args.resume:
-        env.np_random.bit_generator.state = checkpoint["rng_states"]["env_rng_state"]
-        env.action_space.np_random.bit_generator.state = checkpoint["rng_states"][
-            "env_action_space_rng_state"
-        ]
-        env.observation_space.np_random.bit_generator.state = checkpoint["rng_states"][
-            "env_obs_space_rng_state"
-        ]
+    env = make_env(args.env_id, args.seed, args.capture_video, run_name)
     assert isinstance(
         env.action_space, gym.spaces.Box
     ), "only continuous action space is supported"
@@ -199,13 +190,7 @@ if __name__ == "__main__":
 
     # Initialize replay buffer
     env.observation_space.dtype = np.float32
-    rb = ReplayBuffer(
-        args.buffer_size,
-        env.observation_space,
-        env.action_space,
-        device,
-        handle_timeout_termination=True,
-    )
+    rb = ReplayBuffer(args.buffer_size, env.observation_space, env.action_space, device)
     # If resuming training, then load previous replay buffer
     if args.resume:
         rb_data = checkpoint["replay_buffer"]
@@ -220,10 +205,16 @@ if __name__ == "__main__":
     if args.resume:
         start_global_step = checkpoint["global_step"] + 1
 
-    episodic_return = 0
-    episodic_length = 0
-    hidden_in = None
-    obs = env.reset()
+    obs, info = env.reset(seed=args.seed)
+    # Set RNG state for env
+    if args.resume:
+        env.np_random.bit_generator.state = checkpoint["rng_states"]["env_rng_state"]
+        env.action_space.np_random.bit_generator.state = checkpoint["rng_states"][
+            "env_action_space_rng_state"
+        ]
+        env.observation_space.np_random.bit_generator.state = checkpoint["rng_states"][
+            "env_obs_space_rng_state"
+        ]
     for global_step in range(args.total_timesteps):
         # Store values for data logging for each global step
         data_log = {}
@@ -238,54 +229,57 @@ if __name__ == "__main__":
             action = action.detach().cpu().numpy()
 
         # Take step in environment
-        next_obs, reward, done, info = env.step(action)
+        next_obs, reward, terminated, truncated, info = env.step(action)
 
         # Save data to replay buffer
-        rb.add(obs, next_obs, action, reward, done, info)
-
-        # Update episodic reward and length
-        episodic_return += reward
-        episodic_length += 1
+        rb.add(obs, action, next_obs, reward, terminated)
 
         # Update next obs
         obs = next_obs
 
         # Handle episode end, record rewards for plotting purposes
-        if done:
-            print(f"global_step={global_step}, episodic_return={episodic_return}", flush=True)
-            data_log["misc/episodic_return"] = episodic_return
-            data_log["misc/episodic_length"] = episodic_length
+        if terminated or truncated:
+            print(
+                f"global_step={global_step}, episodic_return={info['episode']['r'][0]}, episodic_length={info['episode']['l'][0]}",
+                flush=True,
+            )
+            data_log["misc/episodic_return"] = info["episode"]["r"][0]
+            data_log["misc/episodic_length"] = info["episode"]["l"][0]
 
-            episodic_return = 0
-            episodic_length = 0
-            hidden_in = None
-            obs = env.reset()
+            obs, info = env.reset()
 
         # ALGO LOGIC: training
         if global_step > args.learning_starts:
-            data = rb.sample(args.batch_size)
+            # sample data from replay buffer
+            (
+                observations,
+                actions,
+                next_observations,
+                rewards,
+                terminateds,
+            ) = rb.sample(args.batch_size)
             # no grad because target networks are updated separately (pg. 6 of
             # updated SAC paper)
             with torch.no_grad():
                 next_state_actions, next_state_log_pi, _ = actor.get_action(
-                    data.next_observations
+                    next_observations
                 )
                 # two Q-value estimates for reducing overestimation bias (pg. 8 of updated SAC paper)
-                qf1_next_target = qf1_target(data.next_observations, next_state_actions)
-                qf2_next_target = qf2_target(data.next_observations, next_state_actions)
+                qf1_next_target = qf1_target(next_observations, next_state_actions)
+                qf2_next_target = qf2_target(next_observations, next_state_actions)
                 # calculate eq. 3 in updated SAC paper
                 min_qf_next_target = (
                     torch.min(qf1_next_target, qf2_next_target)
                     - alpha * next_state_log_pi
                 )
                 # calculate eq. 2 in updated SAC paper
-                next_q_value = data.rewards.flatten() + (
-                    1 - data.dones.flatten()
+                next_q_value = rewards.flatten() + (
+                    1 - terminateds.flatten()
                 ) * args.gamma * (min_qf_next_target).view(-1)
 
             # calculate eq. 5 in updated SAC paper
-            qf1_a_values = qf1(data.observations, data.actions).view(-1)
-            qf2_a_values = qf2(data.observations, data.actions).view(-1)
+            qf1_a_values = qf1(observations, actions).view(-1)
+            qf2_a_values = qf2(observations, actions).view(-1)
             qf1_loss = F.mse_loss(qf1_a_values, next_q_value)
             qf2_loss = F.mse_loss(qf2_a_values, next_q_value)
             qf_loss = qf1_loss + qf2_loss
@@ -299,12 +293,12 @@ if __name__ == "__main__":
                 for _ in range(
                     args.policy_frequency
                 ):  # compensate for the delay by doing 'actor_update_interval' instead of 1
-                    pi, log_pi, _ = actor.get_action(data.observations)
+                    pi, log_pi, _ = actor.get_action(observations)
 
                     # no grad because q-networks are updated separately
                     with torch.no_grad():
-                        qf1_pi = qf1(data.observations, pi)
-                        qf2_pi = qf2(data.observations, pi)
+                        qf1_pi = qf1(observations, pi)
+                        qf2_pi = qf2(observations, pi)
                         min_qf_pi = torch.min(qf1_pi, qf2_pi).view(-1)
 
                     # calculate eq. 7 in updated SAC paper
@@ -318,7 +312,7 @@ if __name__ == "__main__":
                     if args.autotune:
                         # no grad because actor network is updated separately
                         with torch.no_grad():
-                            _, log_pi, _ = actor.get_action(data.observations)
+                            _, log_pi, _ = actor.get_action(observations)
                         # calculate eq. 18 in updated SAC paper
                         alpha_loss = (-log_alpha * (log_pi + target_entropy)).mean()
 

@@ -1,7 +1,7 @@
 import torch
 import numpy as np
 from torch.nn.utils.rnn import pad_sequence
-from stable_baselines3.common.preprocessing import get_action_dim, get_obs_shape
+from gymnasium import spaces
 
 
 class ReplayBuffer:
@@ -11,7 +11,6 @@ class ReplayBuffer:
         obs_space,
         action_space,
         device="cpu",
-        handle_timeout_termination=True,
     ):
         self.buffer_size = buffer_size
 
@@ -21,16 +20,14 @@ class ReplayBuffer:
         self.action_dim = get_action_dim(action_space)
 
         self.obs = np.zeros((self.buffer_size,) + self.obs_shape, dtype=obs_space.dtype)
-        self.next_obs = np.zeros(
-            (self.buffer_size,) + self.obs_shape, dtype=obs_space.dtype
-        )
         self.actions = np.zeros(
             (self.buffer_size, self.action_dim), dtype=action_space.dtype
         )
+        self.next_obs = np.zeros(
+            (self.buffer_size,) + self.obs_shape, dtype=obs_space.dtype
+        )
         self.rewards = np.zeros((self.buffer_size), dtype=np.float32)
-        self.dones = np.zeros((self.buffer_size), dtype=np.float32)
-        self.handle_timeout_termination = handle_timeout_termination
-        self.timeouts = np.zeros((self.buffer_size), dtype=np.float32)
+        self.terminateds = np.zeros((self.buffer_size), dtype=np.float32)
 
         self.pos = 0
         self.full = False
@@ -39,12 +36,10 @@ class ReplayBuffer:
     def save_buffer(self):
         buffer_data = {
             "obs": self.obs,
-            "next_obs": self.next_obs,
             "actions": self.actions,
+            "next_obs": self.next_obs,
             "rewards": self.rewards,
-            "dones": self.dones,
-            "handle_timeout_termination": self.handle_timeout_termination,
-            "timeouts": self.timeouts,
+            "terminateds": self.terminateds,
             "pos": self.pos,
             "full": self.full,
         }
@@ -53,25 +48,20 @@ class ReplayBuffer:
 
     def load_buffer(self, buffer_data):
         self.obs = buffer_data["obs"]
-        self.next_obs = buffer_data["next_obs"]
         self.actions = buffer_data["actions"]
+        self.next_obs = buffer_data["next_obs"]
         self.rewards = buffer_data["rewards"]
-        self.dones = buffer_data["dones"]
-        self.handle_timeout_termination = buffer_data["handle_timeout_termination"]
-        self.timeouts = buffer_data["timeouts"]
+        self.terminateds = buffer_data["terminateds"]
         self.pos = buffer_data["pos"]
         self.full = buffer_data["full"]
 
-    def add(self, obs, next_obs, action, reward, done, info):
+    def add(self, obs, action, next_obs, reward, terminated):
         # Copy to avoid modification by reference
         self.obs[self.pos] = np.array(obs).copy()
-        self.next_obs[self.pos] = np.array(next_obs).copy()
         self.actions[self.pos] = np.array(action).copy()
+        self.next_obs[self.pos] = np.array(next_obs).copy()
         self.rewards[self.pos] = np.array(reward).copy()
-        self.dones[self.pos] = np.array(done).copy()
-
-        if self.handle_timeout_termination:
-            self.timeouts[self.pos] = np.array(info.get("TimeLimit.truncated", False))
+        self.terminateds[self.pos] = np.array(terminated).copy()
 
         self.pos += 1
         if self.pos == self.buffer_size:
@@ -86,10 +76,8 @@ class ReplayBuffer:
             torch.as_tensor(self.obs[batch_inds, :]).to(self.device),
             torch.as_tensor(self.actions[batch_inds, :]).to(self.device),
             torch.as_tensor(self.next_obs[batch_inds, :]).to(self.device),
-            torch.as_tensor(self.dones[batch_inds] * (1 - self.timeouts[batch_inds]))
-            .unsqueeze(1)
-            .to(self.device),
             torch.as_tensor(self.rewards[batch_inds]).unsqueeze(1).to(self.device),
+            torch.as_tensor(self.terminateds[batch_inds]).unsqueeze(1).to(self.device),
         )
 
     def sample_history(self, batch_size, history_length=None):
@@ -101,11 +89,11 @@ class ReplayBuffer:
         obs_histories = []
         actions_histories = []
         next_obs_histories = []
-        dones_histories = []
         rewards_histories = []
+        terminateds_histories = []
 
-        # Get locations of all dones
-        dones = np.argwhere(self.dones == 1)[:, 0]
+        # Get locations of all dones (only terminated, not truncated)
+        terminateds = np.argwhere(self.terminateds == 1)[:, 0]
         # Generate batch of histories
         for i in range(batch_size):
             # Get index
@@ -113,47 +101,46 @@ class ReplayBuffer:
             if history_length is None:
                 # Get closest done to index that is less than
                 # the index value
-                if end_timestep <= dones[0]:
+                if end_timestep <= terminateds[0]:
                     start_timestep = 0
                 else:
-                    previous_done_timestep = dones[dones < end_timestep].max()
+                    previous_done_timestep = terminateds[terminateds < end_timestep].max()
                     start_timestep = previous_done_timestep + 1
 
                 # Get full trajectory up to index timestep from start of the episode
                 obs_history = torch.as_tensor(
                     self.obs[start_timestep : end_timestep + 1]
                 )
-                action_history = torch.as_tensor(
+                actions_history = torch.as_tensor(
                     self.actions[start_timestep : end_timestep + 1]
                 )
                 next_obs_history = torch.as_tensor(
                     self.next_obs[start_timestep : end_timestep + 1]
                 )
-                dones_history = torch.as_tensor(
-                    self.dones[start_timestep : end_timestep + 1]
-                    * (1 - self.timeouts[start_timestep : end_timestep + 1])
-                )
                 rewards_history = torch.as_tensor(
                     self.rewards[start_timestep : end_timestep + 1]
+                )
+                terminateds_history = torch.as_tensor(
+                    self.terminateds[start_timestep : end_timestep + 1]
                 )
 
                 # Append to proper lists
                 obs_histories.append(obs_history)
-                actions_histories.append(action_history)
+                actions_histories.append(actions_history)
                 next_obs_histories.append(next_obs_history)
-                dones_histories.append(dones_history)
                 rewards_histories.append(rewards_history)
+                terminateds_histories.append(terminateds_history)
             else:
                 # Go backwards for history length to get trajectory history
                 # If going backwards a history length would go beyond
                 # previous done, then stop history early
-                if end_timestep <= dones[0]:
+                if end_timestep <= terminateds[0]:
                     if end_timestep + 1 - history_length <= 0:
                         start_timestep = 0
                     else:
                         start_timestep = end_timestep + 1 - history_length
                 else:
-                    previous_done_timestep = dones[dones < end_timestep].max()
+                    previous_done_timestep = terminateds[terminateds < end_timestep].max()
                     # Calculate start timestep for history
                     # The +1 is to account for array end indexing
                     start_timestep = end_timestep + 1 - history_length
@@ -164,34 +151,33 @@ class ReplayBuffer:
                 obs_history = torch.as_tensor(
                     self.obs[start_timestep : end_timestep + 1]
                 )
-                action_history = torch.as_tensor(
+                actions_history = torch.as_tensor(
                     self.actions[start_timestep : end_timestep + 1]
                 )
                 next_obs_history = torch.as_tensor(
                     self.next_obs[start_timestep : end_timestep + 1]
                 )
-                dones_history = torch.as_tensor(
-                    self.dones[start_timestep : end_timestep + 1]
-                    * (1 - self.timeouts[start_timestep : end_timestep + 1])
-                )
                 rewards_history = torch.as_tensor(
                     self.rewards[start_timestep : end_timestep + 1]
+                )
+                terminateds_history = torch.as_tensor(
+                    self.terminateds[start_timestep : end_timestep + 1]
                 )
 
                 # Append to proper lists
                 obs_histories.append(obs_history)
-                actions_histories.append(action_history)
+                actions_histories.append(actions_history)
                 next_obs_histories.append(next_obs_history)
-                dones_histories.append(dones_history)
                 rewards_histories.append(rewards_history)
+                terminateds_histories.append(terminateds_history)
 
         # Create padded arrays of history
         seq_lengths = torch.LongTensor(list(map(len, obs_histories)))
         obs_histories = pad_sequence(obs_histories).to(self.device)
         actions_histories = pad_sequence(actions_histories).to(self.device)
         next_obs_histories = pad_sequence(next_obs_histories).to(self.device)
-        dones_histories = torch.unsqueeze(
-            pad_sequence(dones_histories).to(self.device), 2
+        terminateds_histories = torch.unsqueeze(
+            pad_sequence(terminateds_histories).to(self.device), 2
         )
         rewards_histories = torch.unsqueeze(
             pad_sequence(rewards_histories).to(self.device), 2
@@ -201,7 +187,53 @@ class ReplayBuffer:
             obs_histories,
             actions_histories,
             next_obs_histories,
-            dones_histories,
             rewards_histories,
+            terminateds_histories,
             seq_lengths,
         )
+
+
+def get_obs_shape(observation_space):
+    """
+    Get the shape of the observation (useful for the buffers).
+    """
+    if isinstance(observation_space, spaces.Box):
+        return observation_space.shape
+    elif isinstance(observation_space, spaces.Discrete):
+        # Observation is an int
+        return (1,)
+    elif isinstance(observation_space, spaces.MultiDiscrete):
+        # Number of discrete features
+        return (int(len(observation_space.nvec)),)
+    elif isinstance(observation_space, spaces.MultiBinary):
+        # Number of binary features
+        return (int(observation_space.n),)
+    elif isinstance(observation_space, spaces.Dict):
+        return {
+            key: get_obs_shape(subspace)
+            for (key, subspace) in observation_space.spaces.items()
+        }
+
+    else:
+        raise NotImplementedError(
+            f"{observation_space} observation space is not supported"
+        )
+
+
+def get_action_dim(action_space):
+    """
+    Get the dimension of the action space.
+    """
+    if isinstance(action_space, spaces.Box):
+        return int(np.prod(action_space.shape))
+    elif isinstance(action_space, spaces.Discrete):
+        # Action is an int
+        return 1
+    elif isinstance(action_space, spaces.MultiDiscrete):
+        # Number of discrete actions
+        return int(len(action_space.nvec))
+    elif isinstance(action_space, spaces.MultiBinary):
+        # Number of binary actions
+        return int(action_space.n)
+    else:
+        raise NotImplementedError(f"{action_space} action space is not supported")

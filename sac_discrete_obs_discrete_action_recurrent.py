@@ -4,14 +4,17 @@ import random
 import time
 from distutils.util import strtobool
 
-import gym
+import gymnasium as gym
 import numpy as np
 import torch
 import torch.nn.functional as F
 import torch.optim as optim
 
 import wandb
-from common.models import RecurrentDiscreteActorDiscreteObs, RecurrentDiscreteCriticDiscreteObs
+from common.models import (
+    RecurrentDiscreteActorDiscreteObs,
+    RecurrentDiscreteCriticDiscreteObs,
+)
 from common.replay_buffer import ReplayBuffer
 from common.utils import make_env_gym_pomdp, save, set_seed
 
@@ -143,20 +146,10 @@ if __name__ == "__main__":
     env = make_env_gym_pomdp(
         args.env_id,
         args.seed,
-        0,
         args.capture_video,
         run_name,
         max_episode_len=args.maximum_episode_length,
     )
-    # Set RNG state for env
-    if args.resume:
-        env.np_random.bit_generator.state = checkpoint["rng_states"]["env_rng_state"]
-        env.action_space.np_random.bit_generator.state = checkpoint["rng_states"][
-            "env_action_space_rng_state"
-        ]
-        env.observation_space.np_random.bit_generator.state = checkpoint["rng_states"][
-            "env_obs_space_rng_state"
-        ]
     assert isinstance(
         env.action_space, gym.spaces.Discrete
     ), "only discrete action space is supported"
@@ -212,7 +205,6 @@ if __name__ == "__main__":
         env.observation_space,
         env.action_space,
         device,
-        handle_timeout_termination=True,
     )
     # If resuming training, then load previous replay buffer
     if args.resume:
@@ -228,10 +220,17 @@ if __name__ == "__main__":
     if args.resume:
         start_global_step = checkpoint["global_step"] + 1
 
-    episodic_return = 0
-    episodic_length = 0
     hidden_in = None
-    obs = env.reset()
+    obs, info = env.reset(seed=args.seed)
+    # Set RNG state for env
+    if args.resume:
+        env.np_random.bit_generator.state = checkpoint["rng_states"]["env_rng_state"]
+        env.action_space.np_random.bit_generator.state = checkpoint["rng_states"][
+            "env_action_space_rng_state"
+        ]
+        env.observation_space.np_random.bit_generator.state = checkpoint["rng_states"][
+            "env_obs_space_rng_state"
+        ]
     for global_step in range(start_global_step, args.total_timesteps):
         # Store values for data logging for each global step
         data_log = {}
@@ -248,31 +247,25 @@ if __name__ == "__main__":
             hidden_in = hidden_out
 
         # Take step in environment
-        next_obs, reward, done, info = env.step(action)
+        next_obs, reward, terminated, truncated, info = env.step(action)
 
         # Save data to replay buffer
-        rb.add(obs, next_obs, action, reward, done, info)
-
-        # Update episodic reward and length
-        episodic_return += reward
-        episodic_length += 1
+        rb.add(obs, action, next_obs, reward, terminated)
 
         # Update next obs
         obs = next_obs
 
         # Handle episode end, record rewards for plotting purposes
-        if done:
+        if terminated or truncated:
             print(
-                f"global_step={global_step}, episodic_return={episodic_return}",
+                f"global_step={global_step}, episodic_return={info['episode']['r'][0]}, episodic_length={info['episode']['l'][0]}",
                 flush=True,
             )
-            data_log["misc/episodic_return"] = episodic_return
-            data_log["misc/episodic_length"] = episodic_length
+            data_log["misc/episodic_return"] = info["episode"]["r"][0]
+            data_log["misc/episodic_length"] = info["episode"]["l"][0]
 
-            episodic_return = 0
-            episodic_length = 0
             hidden_in = None
-            obs = env.reset()
+            obs, info = env.reset()
 
         # ALGO LOGIC: training
         if global_step > args.learning_starts:
@@ -281,8 +274,8 @@ if __name__ == "__main__":
                 observations,
                 actions,
                 next_observations,
-                dones,
                 rewards,
+                terminateds,
                 seq_lengths,
             ) = rb.sample_history(args.batch_size, args.history_length)
             observations = observations.squeeze(2).long()
@@ -304,7 +297,9 @@ if __name__ == "__main__":
                 )
                 # calculate eq. 2 in updated SAC paper
                 next_q_value = rewards + (
-                    (1 - dones) * args.gamma * qf_next_target.sum(dim=2).unsqueeze(-1)
+                    (1 - terminateds)
+                    * args.gamma
+                    * qf_next_target.sum(dim=2).unsqueeze(-1)
                 )
 
             # calculate eq. 5 in updated SAC paper
