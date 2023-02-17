@@ -241,7 +241,7 @@ if __name__ == "__main__":
         next_obs, reward, terminated, truncated, info = env.step(action)
 
         # Save data to replay buffer
-        rb.add(obs, action, next_obs, reward, terminated)
+        rb.add(obs, action, next_obs, reward, terminated, truncated)
 
         # Update next obs
         obs = next_obs

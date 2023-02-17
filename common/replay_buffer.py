@@ -28,6 +28,7 @@ class ReplayBuffer:
         )
         self.rewards = np.zeros((self.buffer_size), dtype=np.float32)
         self.terminateds = np.zeros((self.buffer_size), dtype=np.float32)
+        self.truncateds = np.zeros((self.buffer_size), dtype=np.float32)
 
         self.pos = 0
         self.full = False
@@ -40,6 +41,7 @@ class ReplayBuffer:
             "next_obs": self.next_obs,
             "rewards": self.rewards,
             "terminateds": self.terminateds,
+            "truncateds": self.truncateds,
             "pos": self.pos,
             "full": self.full,
         }
@@ -52,16 +54,18 @@ class ReplayBuffer:
         self.next_obs = buffer_data["next_obs"]
         self.rewards = buffer_data["rewards"]
         self.terminateds = buffer_data["terminateds"]
+        self.truncateds = buffer_data["truncateds"]
         self.pos = buffer_data["pos"]
         self.full = buffer_data["full"]
 
-    def add(self, obs, action, next_obs, reward, terminated):
+    def add(self, obs, action, next_obs, reward, terminated, truncated):
         # Copy to avoid modification by reference
         self.obs[self.pos] = np.array(obs).copy()
         self.actions[self.pos] = np.array(action).copy()
         self.next_obs[self.pos] = np.array(next_obs).copy()
         self.rewards[self.pos] = np.array(reward).copy()
         self.terminateds[self.pos] = np.array(terminated).copy()
+        self.truncateds[self.pos] = np.array(truncated).copy()
 
         self.pos += 1
         if self.pos == self.buffer_size:
@@ -92,8 +96,9 @@ class ReplayBuffer:
         rewards_histories = []
         terminateds_histories = []
 
-        # Get locations of all dones (only terminated, not truncated)
-        terminateds = np.argwhere(self.terminateds == 1)[:, 0]
+        # Get locations of all dones (both terminated and truncated)
+        dones = self.terminateds + self.truncateds
+        dones = np.argwhere(dones == 1)[:, 0]
         # Generate batch of histories
         for i in range(batch_size):
             # Get index
@@ -101,10 +106,10 @@ class ReplayBuffer:
             if history_length is None:
                 # Get closest done to index that is less than
                 # the index value
-                if end_timestep <= terminateds[0]:
+                if end_timestep <= dones[0]:
                     start_timestep = 0
                 else:
-                    previous_done_timestep = terminateds[terminateds < end_timestep].max()
+                    previous_done_timestep = dones[dones < end_timestep].max()
                     start_timestep = previous_done_timestep + 1
 
                 # Get full trajectory up to index timestep from start of the episode
@@ -134,13 +139,13 @@ class ReplayBuffer:
                 # Go backwards for history length to get trajectory history
                 # If going backwards a history length would go beyond
                 # previous done, then stop history early
-                if end_timestep <= terminateds[0]:
+                if end_timestep <= dones[0]:
                     if end_timestep + 1 - history_length <= 0:
                         start_timestep = 0
                     else:
                         start_timestep = end_timestep + 1 - history_length
                 else:
-                    previous_done_timestep = terminateds[terminateds < end_timestep].max()
+                    previous_done_timestep = dones[dones < end_timestep].max()
                     # Calculate start timestep for history
                     # The +1 is to account for array end indexing
                     start_timestep = end_timestep + 1 - history_length

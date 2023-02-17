@@ -4,10 +4,10 @@ import random
 import gymnasium as gym
 import numpy as np
 import torch
-# from gym_pomdps.wrappers.resetobservation import ResetObservationWrapper
+import gymnasium_pomdps
 
 
-def make_env(env_id, seed, capture_video, run_name):
+def make_env(env_id, seed, capture_video, run_name, max_episode_len=None):
     """Generates seeded environment.
 
     Parameters
@@ -29,46 +29,26 @@ def make_env(env_id, seed, capture_video, run_name):
         Gym environment to be used for learning.
     """
     env = gym.make(env_id)
-    env = gym.wrappers.RecordEpisodeStatistics(env)
+    if max_episode_len is not None:
+        env = gym.wrappers.TimeLimit(env, max_episode_steps=max_episode_len)
     if capture_video:
         env = gym.wrappers.RecordVideo(env, f"videos/{run_name}")
+    env = gym.wrappers.RecordEpisodeStatistics(env)
     env.action_space.seed(seed)
     env.observation_space.seed(seed)
     return env
 
 
-def make_env_gym_pomdp(env_id, seed, capture_video, run_name, max_episode_len):
-    """Generates seeded environment for discrete Gym POMDPs that need
-    additional env wrappers.
-
-    Parameters
-    ----------
-    env_id : string
-        Name of Gym environment.
-    seed : int
-        Seed.
-    capture_video : boolean
-        Whether to record videos or not.
-    run_name : string
-        Name of run to be used for video.
-
-    Returns
-    -------
-    env : gym environment
-        Gym environment to be used for learning.
-    """
-    env = gym.wrappers.TimeLimit(
-        ResetObservationWrapper(gym.make(env_id)), max_episode_steps=max_episode_len
-    )
-    env = gym.wrappers.RecordEpisodeStatistics(env)
-    if capture_video:
-        env = gym.wrappers.RecordVideo(env, f"videos/{run_name}")
-    env.action_space.seed(seed)
-    env.observation_space.seed(seed)
-    return env
-
-
-def save(run_name, run_id, checkpoint_dir, global_step, models, optimizers, replay_buffer, rng_states):
+def save(
+    run_name,
+    run_id,
+    checkpoint_dir,
+    global_step,
+    models,
+    optimizers,
+    replay_buffer,
+    rng_states,
+):
     import os
 
     save_dir = checkpoint_dir + run_name + "__" + run_id + "/"

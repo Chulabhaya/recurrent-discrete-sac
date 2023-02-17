@@ -13,7 +13,7 @@ import torch.optim as optim
 import wandb
 from common.models import DiscreteActorDiscreteObs, DiscreteCriticDiscreteObs
 from common.replay_buffer import ReplayBuffer
-from common.utils import make_env_gym_pomdp, save, set_seed
+from common.utils import make_env, save, set_seed
 
 
 def parse_args():
@@ -136,7 +136,7 @@ if __name__ == "__main__":
             )
 
     # Env setup
-    env = make_env_gym_pomdp(
+    env = make_env(
         args.env_id,
         args.seed,
         args.capture_video,
@@ -238,7 +238,7 @@ if __name__ == "__main__":
         next_obs, reward, terminated, truncated, info = env.step(action)
 
         # Save data to replay buffer
-        rb.add(obs, action, next_obs, reward, terminated)
+        rb.add(obs, action, next_obs, reward, terminated, truncated)
 
         # Update next obs
         obs = next_obs

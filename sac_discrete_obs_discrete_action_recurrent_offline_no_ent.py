@@ -14,7 +14,7 @@ import torch.optim as optim
 import wandb
 from common.models import RecurrentDiscreteActorDiscreteObs, RecurrentDiscreteCriticDiscreteObs
 from common.replay_buffer import ReplayBuffer
-from common.utils import make_env_gym_pomdp, set_seed, save
+from common.utils import make_env, set_seed, save
 
 
 def parse_args():
@@ -100,7 +100,7 @@ def eval_policy(
     with torch.no_grad():
         # Initialization
         run_name_full = run_name + "__eval__" + str(global_step)
-        env = make_env_gym_pomdp(
+        env = make_env(
             env_name,
             seed + seed_offset,
             capture_video,
@@ -202,7 +202,7 @@ if __name__ == "__main__":
             )
 
     # Env setup
-    env = make_env_gym_pomdp(
+    env = make_env(
         args.env_id,
         args.seed,
         args.capture_video,
