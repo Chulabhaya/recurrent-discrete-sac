@@ -104,7 +104,7 @@ def eval_policy(
     with torch.no_grad():
         # Initialization
         run_name_full = run_name + "__eval__" + str(global_step)
-        env = make_env_gym_pomdp(
+        env = make_env(
             env_name,
             seed + seed_offset,
             capture_video,

@@ -6,27 +6,24 @@ import torch
 
 from models import RecurrentDiscreteActorDiscreteObs
 from replay_buffer import ReplayBuffer
-from utils import make_env_gym_pomdp, set_seed
+from utils import make_env, set_seed
 
 
-def collect_trained_policy_data(env, actor, device, total_timesteps):
+def collect_trained_policy_data(env, actor, device, seed, total_timesteps):
     # Initialize replay buffer for storing data
     rb = ReplayBuffer(
         total_timesteps,
         env.observation_space,
         env.action_space,
         device,
-        handle_timeout_termination=True,
     )
 
     # Initialize environment interaction loop
-    done = False
+    terminated, truncated = False, False
     hidden_in = None
-    obs = env.reset()
+    obs, info = env.reset(seed=seed)
 
     # Generate data
-    episodic_return = 0
-    episodic_length = 0
     episodic_count = 0
     global_step = 0
     for global_step in range(0, total_timesteps):
@@ -39,30 +36,24 @@ def collect_trained_policy_data(env, actor, device, total_timesteps):
         hidden_in = hidden_out
 
         # Take action in environment
-        next_obs, reward, done, info = env.step(action)
+        next_obs, reward, terminated, truncated, info = env.step(action)
 
         # Save data to replay buffer
-        rb.add(obs, next_obs, action, reward, done, info)
+        rb.add(obs, action, next_obs, reward, terminated, truncated)
 
         # Update next obs
         obs = next_obs
 
-        # Update episodic reward and length
-        episodic_return += reward
-        episodic_length += 1
-
         # If episode is over, reset environment and
         # update episode count
-        if done:
+        if terminated or truncated:
             print(
-                f"global_step={global_step}, episodic_return={episodic_return}, episodic_length={episodic_length}, episodic_count={episodic_count}",
+                f"global_step={global_step}, episodic_return={info['episode']['r'][0]}, episodic_length={info['episode']['l'][0]}",
                 flush=True,
             )
             episodic_count += 1
-            episodic_return = 0
-            episodic_length = 0
             hidden_in = None
-            obs = env.reset()
+            obs, info = env.reset()
 
     return rb
 
@@ -79,9 +70,9 @@ def parse_args():
         help="the id of the environment for the trained policy")
     parser.add_argument("--maximum-episode-length", type=int, default=50,
         help="maximum length for episodes for gym POMDP environment")
-    parser.add_argument("--total-timesteps", type=int, default=10000,
+    parser.add_argument("--total-timesteps", type=int, default=100000,
         help="total timesteps of data to gather from policy")
-    parser.add_argument("--checkpoint", type=str, default="trained_models/POMDP-heavenhell_1-episodic-v0__laptop_seed1_run1_cudnn_on__1__1675040882_3d0707f5/global_step_40000.pth",
+    parser.add_argument("--checkpoint", type=str, default="./global_step_135000.pth",
         help="path to checkpoint with trained policy")
 
     args = parser.parse_args()
@@ -100,10 +91,9 @@ def main():
     set_seed(args.seed, device)
 
     # Initialize environment for generating dataset
-    env = make_env_gym_pomdp(
+    env = make_env(
         args.env_id,
         args.seed,
-        0,
         False,
         "",
         max_episode_len=args.maximum_episode_length,
@@ -118,13 +108,13 @@ def main():
     actor.load_state_dict(checkpoint["model_state_dict"]["actor_state_dict"])
 
     # Collect dataset in a replay buffer
-    rb = collect_trained_policy_data(env, actor, device, args.total_timesteps)
+    rb = collect_trained_policy_data(env, actor, device, args.seed, args.total_timesteps)
 
     # Get dictionary of replay buffer data
     rb_data = rb.save_buffer()
 
     # Save out dictionary into pickle file
-    f = open("heavenhell_1_low_data.pkl", "wb")
+    f = open("heavenhell_1_expert_data.pkl", "wb")
     pickle.dump(rb_data, f)
     f.close()
 
