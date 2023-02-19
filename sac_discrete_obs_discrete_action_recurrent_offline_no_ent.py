@@ -26,8 +26,10 @@ def parse_args():
         help="seed of the experiment")
     parser.add_argument("--cuda", type=lambda x: bool(strtobool(x)), default=True, nargs="?", const=True,
         help="if toggled, cuda will be enabled by default")
-    parser.add_argument("--wandb-project-name", type=str, default="sac-discrete-obs-discrete-action-recurrent-offline-no-ent",
-        help="the wandb's project name")
+    parser.add_argument("--wandb-project", type=str, default="sac-discrete-obs-discrete-action-recurrent-offline-no-ent",
+        help="wandb project name")
+    parser.add_argument("--wandb-group", type=str, default=None,
+        help="wandb group name to use for run")
     parser.add_argument("--wandb-dir", type=str, default="./",
         help="the wandb directory")
     parser.add_argument("--capture-video", type=lambda x: bool(strtobool(x)), default=False, nargs="?", const=True,
@@ -156,25 +158,25 @@ if __name__ == "__main__":
         wandb.init(
             id=args.run_id,
             dir=args.wandb_dir,
-            project=args.wandb_project_name,
+            project=args.wandb_project,
             config=vars(args),
             name=run_name,
             resume="must",
             save_code=True,
             settings=wandb.Settings(code_dir="."),
-            group=args.env_id,
+            group=args.wandb_group,
             mode="offline",
         )
     else:
         wandb.init(
             id=run_id,
             dir=args.wandb_dir,
-            project=args.wandb_project_name,
+            project=args.wandb_project,
             config=vars(args),
             name=run_name,
             save_code=True,
             settings=wandb.Settings(code_dir="."),
-            group=args.env_id,
+            group=args.wandb_group,
             mode="offline",
         )
 
