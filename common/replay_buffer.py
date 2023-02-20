@@ -97,8 +97,8 @@ class ReplayBuffer:
         terminateds_histories = []
 
         # Get locations of all dones (both terminated and truncated)
-        dones = self.terminateds + self.truncateds
-        dones = np.argwhere(dones == 1)[:, 0]
+        dones = np.logical_or(self.terminateds, self.truncateds)
+        dones = np.argwhere(dones)[:, 0]
         # Generate batch of histories
         for i in range(batch_size):
             # Get index
