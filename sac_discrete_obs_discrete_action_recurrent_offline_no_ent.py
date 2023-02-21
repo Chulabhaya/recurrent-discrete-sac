@@ -113,9 +113,9 @@ def eval_policy(
         avg_episodic_return = 0
         avg_episodic_length = 0
         # Start evaluation
+        obs, info = env.reset(seed=seed + seed_offset)
         for _ in range(num_evals):
             terminated, truncated = False, False
-            obs, info = env.reset(seed=seed + seed_offset)
             hidden_in = None
             while not (truncated or terminated):
                 # Get action
@@ -133,6 +133,7 @@ def eval_policy(
                 obs = next_obs
             avg_episodic_return += info["episode"]["r"][0]
             avg_episodic_length += info["episode"]["l"][0]
+            obs, info = env.reset()
         # Update averages
         avg_episodic_return /= num_evals
         avg_episodic_length /= num_evals
