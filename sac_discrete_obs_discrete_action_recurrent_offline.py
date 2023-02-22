@@ -12,7 +12,10 @@ import torch.nn.functional as F
 import torch.optim as optim
 
 import wandb
-from common.models import RecurrentDiscreteActorDiscreteObs, RecurrentDiscreteCriticDiscreteObs
+from common.models import (
+    RecurrentDiscreteActorDiscreteObs,
+    RecurrentDiscreteCriticDiscreteObs,
+)
 from common.replay_buffer import ReplayBuffer
 from common.utils import make_env, set_seed, save
 
@@ -427,8 +430,12 @@ if __name__ == "__main__":
                 )
 
         if global_step % 100 == 0:
-            data_log["losses/qf1_values"] = qf1_a_values.mean().item()
-            data_log["losses/qf2_values"] = qf2_a_values.mean().item()
+            data_log["losses/qf1_values"] = (
+                torch.sum(qf1_a_values * q_loss_mask) / q_loss_mask_nonzero_elements
+            ).item()
+            data_log["losses/qf2_values"] = (
+                torch.sum(qf2_a_values * q_loss_mask) / q_loss_mask_nonzero_elements
+            ).item()
             data_log["losses/qf1_loss"] = qf1_loss.item()
             data_log["losses/qf2_loss"] = qf2_loss.item()
             data_log["losses/qf_loss"] = qf_loss.item() / 2.0

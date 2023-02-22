@@ -12,7 +12,10 @@ import torch.nn.functional as F
 import torch.optim as optim
 
 import wandb
-from common.models import RecurrentDiscreteActorDiscreteObs, RecurrentDiscreteCriticDiscreteObs
+from common.models import (
+    RecurrentDiscreteActorDiscreteObs,
+    RecurrentDiscreteCriticDiscreteObs,
+)
 from common.replay_buffer import ReplayBuffer
 from common.utils import make_env, set_seed, save
 
@@ -38,7 +41,7 @@ def parse_args():
     # Algorithm specific arguments
     parser.add_argument("--env-id", type=str, default="POMDP-heavenhell_1-episodic-v0",
         help="the id of the environment")
-    parser.add_argument("--total-timesteps", type=int, default=100000,
+    parser.add_argument("--total-timesteps", type=int, default=200000,
         help="total timesteps of the experiments")
     parser.add_argument("--maximum-episode-length", type=int, default=50,
         help="maximum length for episodes for gym POMDP environment")
@@ -74,7 +77,7 @@ def parse_args():
         help="how often to save checkpoints during training (in timesteps)")
     parser.add_argument("--resume", type=lambda x: bool(strtobool(x)), default=False, nargs="?", const=True,
         help="whether to resume training from a checkpoint")
-    parser.add_argument("--resume-checkpoint-path", type=str, default="trained_models/POMDP-heavenhell_1-episodic-v0__sac_discrete_obs_discrete_action_recurrent__1__1674880703_3ahou5az/global_step_5000.pth",
+    parser.add_argument("--resume-checkpoint-path", type=str, default="online_global_step_30000.pth",
         help="path to checkpoint to resume training from")
     parser.add_argument("--run-id", type=str, default=None,
         help="wandb unique run id for resuming")
@@ -379,8 +382,12 @@ if __name__ == "__main__":
                 )
 
         if global_step % 100 == 0:
-            data_log["losses/qf1_values"] = qf1_a_values.mean().item()
-            data_log["losses/qf2_values"] = qf2_a_values.mean().item()
+            data_log["losses/qf1_values"] = (
+                torch.sum(qf1_a_values * q_loss_mask) / q_loss_mask_nonzero_elements
+            ).item()
+            data_log["losses/qf2_values"] = (
+                torch.sum(qf2_a_values * q_loss_mask) / q_loss_mask_nonzero_elements
+            ).item()
             data_log["losses/qf1_loss"] = qf1_loss.item()
             data_log["losses/qf2_loss"] = qf2_loss.item()
             data_log["losses/qf_loss"] = qf_loss.item() / 2.0
