@@ -450,9 +450,9 @@ if __name__ == "__main__":
                     optimizers["a_optimizer"] = a_optimizer.state_dict()
                     models["log_alpha"] = log_alpha
                 # Save replay buffer
-                print("Saving checkpoint rb pos: {}".format(rb.pos))
+                print("Saving checkpoint rb pos: {}".format(rb.pos), flush=True)
                 rb_data = rb.save_buffer()
-                print(rb_data["pos"])
+                print(rb_data["pos"], flush=True)
                 # Save random states, important for reproducibility
                 rng_states = {
                     "random_rng_state": random.getstate(),
