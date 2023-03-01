@@ -40,7 +40,7 @@ def parse_args():
     # Algorithm specific arguments
     parser.add_argument("--env-id", type=str, default="POMDP-heavenhell_1-episodic-v0",
         help="the id of the environment")
-    parser.add_argument("--total-timesteps", type=int, default=100500,
+    parser.add_argument("--total-timesteps", type=int, default=200500,
         help="total timesteps of the experiments")
     parser.add_argument("--maximum-episode-length", type=int, default=50,
         help="maximum length for episodes for gym POMDP environment")
@@ -187,6 +187,7 @@ if __name__ == "__main__":
 
     # Automatic entropy tuning
     if args.autotune:
+        # TODO: Fix alpha not being set correctly when resuming from checkpoint
         target_entropy = -0.3 * torch.log(1 / torch.tensor(env.action_space.n))
         log_alpha = torch.zeros(1, requires_grad=True, device=device)
         a_optimizer = optim.Adam([log_alpha], lr=args.q_lr, eps=1e-4)
@@ -421,6 +422,7 @@ if __name__ == "__main__":
                 data_log["misc/steps_per_second"] = int(
                     global_step / (time.time() - start_time)
                 )
+                data_log["misc/rb_pos"] = rb.pos
                 print("SPS:", int(global_step / (time.time() - start_time)), flush=True)
                 if args.autotune:
                     data_log["losses/alpha_loss"] = alpha_loss.item()
@@ -446,8 +448,11 @@ if __name__ == "__main__":
                 }
                 if args.autotune:
                     optimizers["a_optimizer"] = a_optimizer.state_dict()
+                    models["log_alpha"] = log_alpha
                 # Save replay buffer
+                print("Saving checkpoint rb pos: {}".format(rb.pos))
                 rb_data = rb.save_buffer()
+                print(rb_data["pos"])
                 # Save random states, important for reproducibility
                 rng_states = {
                     "random_rng_state": random.getstate(),
