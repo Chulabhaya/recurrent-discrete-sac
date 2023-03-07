@@ -1,8 +1,8 @@
 import string
-import gym
-from gym_pomdps.wrappers.resetobservation import ResetObservationWrapper
+import gymnasium as gym
 import numpy as np
 import random
+import gymnasium_pomdps
 
 
 class HeavenHell2ScriptedPolicy:
@@ -243,7 +243,7 @@ def collect_episodes_scripted_policy(
     """
     # Generate environment
     env = gym.wrappers.TimeLimit(
-        ResetObservationWrapper(gym.make(environment)),
+        gym.make(environment),
         max_episode_steps=max_episode_steps,
     )
 
@@ -261,43 +261,40 @@ def collect_episodes_scripted_policy(
     next_observation_dataset = []
     action_dataset = []
     reward_dataset = []
-    done_dataset = []
+    terminated_dataset = []
+    truncated_dataset = []
     timeout_dataset = []
 
     # Initialize environment interaction loop
+    terminated, truncated = False, False
     done = False
-    observation = env.reset()
+    obs, info = env.reset()
 
     # Generate episodes
     episode_timestep = 0
     while episode_count < num_episodes:
         # Get action from scripted policy
-        action = agent.get_action(env, observation, done, epsilon)
+        action = agent.get_action(env, obs, done, epsilon)
 
         # Take action in environment
-        next_observation, reward, done, info = env.step(action)
+        next_obs, reward, terminated, truncated, info = env.step(action)
 
         # Update dataset
-        observation_dataset.append(observation)
-        next_observation_dataset.append(next_observation)
+        observation_dataset.append(obs)
+        next_observation_dataset.append(next_obs)
         action_dataset.append(action)
         reward_dataset.append(reward)
-        done_dataset.append(done)
+        terminated_dataset.append(terminated)
+        truncated_dataset.append(truncated)
 
         # If episode is over, reset environment and
         # update episode count
-        if done:
-            observation = env.reset()
+        if terminated or truncated:
+            obs, info = env.reset()
             episode_count += 1
-            if episode_timestep == max_episode_steps - 1:
-                timeout_dataset.append(1)
-                episode_timestep = 0
-            else:
-                timeout_dataset.append(0)
-                episode_timestep = 0
+            done = True
         else:
-            timeout_dataset.append(0)
-            observation = next_observation
+            obs = next_obs
             episode_timestep += 1
 
     # Return datasets
@@ -305,16 +302,17 @@ def collect_episodes_scripted_policy(
     next_observation_dataset = np.array(next_observation_dataset)
     action_dataset = np.array(action_dataset)
     reward_dataset = np.array(reward_dataset)
-    done_dataset = np.array(done_dataset)
-    timeout_dataset = np.array(timeout_dataset)
+    terminated_dataset = np.array(terminated_dataset)
+    truncated_dataset = np.array(truncated_dataset)
 
     combined_dataset = {
         "observations": observation_dataset,
         "actions": action_dataset,
         "next_observations": next_observation_dataset,
-        "dones": done_dataset,
         "rewards": reward_dataset,
-        "timeouts": timeout_dataset
+        "terminateds": terminated_dataset,
+        "truncateds": truncated_dataset,
+        "timeouts": timeout_dataset,
     }
 
     return combined_dataset
@@ -329,9 +327,9 @@ def main():
         observations=dataset_1000_episodes["observations"],
         actions=dataset_1000_episodes["actions"],
         next_observations=dataset_1000_episodes["next_observations"],
-        dones=dataset_1000_episodes["dones"],
         rewards=dataset_1000_episodes["rewards"],
-        timeouts=dataset_1000_episodes["timeouts"]
+        terminateds=dataset_1000_episodes["terminateds"],
+        truncateds=dataset_1000_episodes["truncateds"],
     )
 
 

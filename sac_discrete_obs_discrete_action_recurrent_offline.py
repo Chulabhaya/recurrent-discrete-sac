@@ -1,4 +1,3 @@
-# docs and experiment results can be found at https://docs.cleanrl.dev/rl-algorithms/sac/#sac_continuous_actionpy
 import argparse
 import os
 import random
@@ -6,16 +5,19 @@ import time
 from distutils.util import strtobool
 import pickle
 
-import gym
+import gymnasium as gym
 import numpy as np
 import torch
 import torch.nn.functional as F
 import torch.optim as optim
 
 import wandb
-from common.models import RecurrentDiscreteActorDiscreteObs, RecurrentDiscreteCriticDiscreteObs
-from common.replay_buffer import ReplayBuffer
-from common.utils import make_env_gym_pomdp, set_seed, save
+from common.models import (
+    RecurrentDiscreteActorDiscreteObs,
+    RecurrentDiscreteCriticDiscreteObs,
+)
+from common.replay_buffer import EpisodicReplayBuffer
+from common.utils import make_env, set_seed, save
 
 
 def parse_args():
@@ -27,8 +29,10 @@ def parse_args():
         help="seed of the experiment")
     parser.add_argument("--cuda", type=lambda x: bool(strtobool(x)), default=True, nargs="?", const=True,
         help="if toggled, cuda will be enabled by default")
-    parser.add_argument("--wandb-project-name", type=str, default="sac-discrete-obs-discrete-action-recurrent-offline",
-        help="the wandb's project name")
+    parser.add_argument("--wandb-project", type=str, default="sac-discrete-obs-discrete-action-recurrent-offline",
+        help="wandb project name")
+    parser.add_argument("--wandb-group", type=str, default=None,
+        help="wandb group name to use for run")
     parser.add_argument("--wandb-dir", type=str, default="./",
         help="the wandb directory")
     parser.add_argument("--capture-video", type=lambda x: bool(strtobool(x)), default=False, nargs="?", const=True,
@@ -41,6 +45,8 @@ def parse_args():
         help="total timesteps of the experiments")
     parser.add_argument("--maximum-episode-length", type=int, default=50,
         help="maximum length for episodes for gym POMDP environment")
+    parser.add_argument("--buffer-size", type=int, default=int(1e5),
+        help="the replay memory buffer size")
     parser.add_argument("--gamma", type=float, default=0.99,
         help="the discount factor gamma")
     parser.add_argument("--tau", type=float, default=0.005,
@@ -105,23 +111,22 @@ def eval_policy(
     with torch.no_grad():
         # Initialization
         run_name_full = run_name + "__eval__" + str(global_step)
-        env = make_env_gym_pomdp(
+        env = make_env(
             env_name,
             seed + seed_offset,
-            0,
             capture_video,
             run_name_full,
             max_episode_len=max_episode_len,
         )
-
+        # Track averages
         avg_episodic_return = 0
         avg_episodic_length = 0
         # Start evaluation
+        obs, info = env.reset(seed=seed + seed_offset)
         for _ in range(num_evals):
-            done = False
-            obs = env.reset()
+            terminated, truncated = False, False
             hidden_in = None
-            while not done:
+            while not (truncated or terminated):
                 # Get action
                 seq_lengths = torch.LongTensor([1])
                 action, _, _, hidden_out = actor.get_action(
@@ -131,19 +136,18 @@ def eval_policy(
                 hidden_in = hidden_out
 
                 # Take step in environment
-                next_obs, reward, done, info = env.step(action)
-
-                # Update episodic reward and length
-                avg_episodic_return += reward
-                avg_episodic_length += 1
+                next_obs, reward, terminated, truncated, info = env.step(action)
 
                 # Update next obs
                 obs = next_obs
-
+            avg_episodic_return += info["episode"]["r"][0]
+            avg_episodic_length += info["episode"]["l"][0]
+            obs, info = env.reset()
+        # Update averages
         avg_episodic_return /= num_evals
         avg_episodic_length /= num_evals
         print(
-            f"global_step={global_step}, episodic_return={avg_episodic_return}",
+            f"global_step={global_step}, episodic_return={avg_episodic_return}, episodic_length={avg_episodic_length}",
             flush=True,
         )
         data_log["misc/episodic_return"] = avg_episodic_return
@@ -164,25 +168,25 @@ if __name__ == "__main__":
         wandb.init(
             id=args.run_id,
             dir=args.wandb_dir,
-            project=args.wandb_project_name,
+            project=args.wandb_project,
             config=vars(args),
             name=run_name,
             resume="must",
             save_code=True,
             settings=wandb.Settings(code_dir="."),
-            group=args.env_id,
+            group=args.wandb_group,
             mode="offline",
         )
     else:
         wandb.init(
             id=run_id,
             dir=args.wandb_dir,
-            project=args.wandb_project_name,
+            project=args.wandb_project,
             config=vars(args),
             name=run_name,
             save_code=True,
             settings=wandb.Settings(code_dir="."),
-            group=args.env_id,
+            group=args.wandb_group,
             mode="offline",
         )
 
@@ -210,10 +214,9 @@ if __name__ == "__main__":
             )
 
     # Env setup
-    env = make_env_gym_pomdp(
+    env = make_env(
         args.env_id,
         args.seed,
-        0,
         args.capture_video,
         run_name,
         max_episode_len=args.maximum_episode_length,
@@ -280,12 +283,9 @@ if __name__ == "__main__":
 
     # Initialize replay buffer
     env.observation_space.dtype = np.float32
-    rb = ReplayBuffer(
-        dataset["obs"].shape[0],
-        env.observation_space,
-        env.action_space,
+    rb = EpisodicReplayBuffer(
+        args.buffer_size,
         device,
-        handle_timeout_termination=True,
     )
     rb.load_buffer(dataset)
 
@@ -307,12 +307,10 @@ if __name__ == "__main__":
             observations,
             actions,
             next_observations,
-            dones,
             rewards,
+            terminateds,
             seq_lengths,
         ) = rb.sample_history(args.batch_size)
-        observations = observations.squeeze(2).long()
-        next_observations = next_observations.squeeze(2).long()
         # ---------- update critic ---------- #
         # no grad because target networks are updated separately (pg. 6 of
         # updated SAC paper)
@@ -330,7 +328,7 @@ if __name__ == "__main__":
             )
             # calculate eq. 2 in updated SAC paper
             next_q_value = rewards + (
-                (1 - dones) * args.gamma * qf_next_target.sum(dim=2).unsqueeze(-1)
+                (1 - terminateds) * args.gamma * qf_next_target.sum(dim=2).unsqueeze(-1)
             )
 
         # calculate eq. 5 in updated SAC paper
@@ -430,8 +428,12 @@ if __name__ == "__main__":
                 )
 
         if global_step % 100 == 0:
-            data_log["losses/qf1_values"] = qf1_a_values.mean().item()
-            data_log["losses/qf2_values"] = qf2_a_values.mean().item()
+            data_log["losses/qf1_values"] = (
+                torch.sum(qf1_a_values * q_loss_mask) / q_loss_mask_nonzero_elements
+            ).item()
+            data_log["losses/qf2_values"] = (
+                torch.sum(qf2_a_values * q_loss_mask) / q_loss_mask_nonzero_elements
+            ).item()
             data_log["losses/qf1_loss"] = qf1_loss.item()
             data_log["losses/qf2_loss"] = qf2_loss.item()
             data_log["losses/qf_loss"] = qf_loss.item() / 2.0

@@ -4,16 +4,19 @@ import random
 import time
 from distutils.util import strtobool
 
-import gym
+import gymnasium as gym
 import numpy as np
 import torch
 import torch.nn.functional as F
 import torch.optim as optim
 
 import wandb
-from common.models import RecurrentDiscreteActorDiscreteObs, RecurrentDiscreteCriticDiscreteObs
-from common.replay_buffer import ReplayBuffer
-from common.utils import make_env_gym_pomdp, save, set_seed
+from common.models import (
+    RecurrentDiscreteActorDiscreteObs,
+    RecurrentDiscreteCriticDiscreteObs,
+)
+from common.replay_buffer import EpisodicReplayBuffer
+from common.utils import make_env, save, set_seed
 
 
 def parse_args():
@@ -25,8 +28,10 @@ def parse_args():
         help="seed of the experiment")
     parser.add_argument("--cuda", type=lambda x: bool(strtobool(x)), default=True, nargs="?", const=True,
         help="if toggled, cuda will be enabled by default")
-    parser.add_argument("--wandb-project-name", type=str, default="sac-discrete-obs-discrete-action-recurrent",
-        help="the wandb's project name")
+    parser.add_argument("--wandb-project", type=str, default="sac-discrete-obs-discrete-action-recurrent",
+        help="wandb project name")
+    parser.add_argument("--wandb-group", type=str, default=None,
+        help="wandb group name to use for run")
     parser.add_argument("--wandb-dir", type=str, default="./",
         help="the wandb directory")
     parser.add_argument("--capture-video", type=lambda x: bool(strtobool(x)), default=False, nargs="?", const=True,
@@ -35,7 +40,7 @@ def parse_args():
     # Algorithm specific arguments
     parser.add_argument("--env-id", type=str, default="POMDP-heavenhell_1-episodic-v0",
         help="the id of the environment")
-    parser.add_argument("--total-timesteps", type=int, default=100500,
+    parser.add_argument("--total-timesteps", type=int, default=200500,
         help="total timesteps of the experiments")
     parser.add_argument("--maximum-episode-length", type=int, default=50,
         help="maximum length for episodes for gym POMDP environment")
@@ -47,8 +52,6 @@ def parse_args():
         help="target smoothing coefficient (default: 0.005)")
     parser.add_argument("--batch-size", type=int, default=256,
         help="the batch size of sample from the reply memory")
-    parser.add_argument("--history-length", type=int, default=None,
-        help="the observation sequence length (history) to use")
     parser.add_argument("--learning-starts", type=int, default=5e3,
         help="timestep to start learning")
     parser.add_argument("--policy-lr", type=float, default=3e-4,
@@ -73,7 +76,7 @@ def parse_args():
         help="how often to save checkpoints during training (in timesteps)")
     parser.add_argument("--resume", type=lambda x: bool(strtobool(x)), default=False, nargs="?", const=True,
         help="whether to resume training from a checkpoint")
-    parser.add_argument("--resume-checkpoint-path", type=str, default="trained_models/POMDP-heavenhell_1-episodic-v0__sac_discrete_obs_discrete_action_recurrent__1__1674880703_3ahou5az/global_step_5000.pth",
+    parser.add_argument("--resume-checkpoint-path", type=str, default="gymnasium_seed_4_global_step_120000.pth",
         help="path to checkpoint to resume training from")
     parser.add_argument("--run-id", type=str, default=None,
         help="wandb unique run id for resuming")
@@ -94,25 +97,25 @@ if __name__ == "__main__":
         wandb.init(
             id=args.run_id,
             dir=args.wandb_dir,
-            project=args.wandb_project_name,
+            project=args.wandb_project,
             config=vars(args),
             name=run_name,
             resume="must",
             save_code=True,
             settings=wandb.Settings(code_dir="."),
-            group=args.env_id,
+            group=args.wandb_group,
             mode="offline",
         )
     else:
         wandb.init(
             id=run_id,
             dir=args.wandb_dir,
-            project=args.wandb_project_name,
+            project=args.wandb_project,
             config=vars(args),
             name=run_name,
             save_code=True,
             settings=wandb.Settings(code_dir="."),
-            group=args.env_id,
+            group=args.wandb_group,
             mode="offline",
         )
 
@@ -140,23 +143,13 @@ if __name__ == "__main__":
             )
 
     # Env setup
-    env = make_env_gym_pomdp(
+    env = make_env(
         args.env_id,
         args.seed,
-        0,
         args.capture_video,
         run_name,
         max_episode_len=args.maximum_episode_length,
     )
-    # Set RNG state for env
-    if args.resume:
-        env.np_random.bit_generator.state = checkpoint["rng_states"]["env_rng_state"]
-        env.action_space.np_random.bit_generator.state = checkpoint["rng_states"][
-            "env_action_space_rng_state"
-        ]
-        env.observation_space.np_random.bit_generator.state = checkpoint["rng_states"][
-            "env_obs_space_rng_state"
-        ]
     assert isinstance(
         env.action_space, gym.spaces.Discrete
     ), "only discrete action space is supported"
@@ -192,6 +185,7 @@ if __name__ == "__main__":
 
     # Automatic entropy tuning
     if args.autotune:
+        # TODO: Fix alpha not being set correctly when resuming from checkpoint
         target_entropy = -0.3 * torch.log(1 / torch.tensor(env.action_space.n))
         log_alpha = torch.zeros(1, requires_grad=True, device=device)
         a_optimizer = optim.Adam([log_alpha], lr=args.q_lr, eps=1e-4)
@@ -207,12 +201,9 @@ if __name__ == "__main__":
 
     # Initialize replay buffer
     env.observation_space.dtype = np.float32
-    rb = ReplayBuffer(
+    rb = EpisodicReplayBuffer(
         args.buffer_size,
-        env.observation_space,
-        env.action_space,
         device,
-        handle_timeout_termination=True,
     )
     # If resuming training, then load previous replay buffer
     if args.resume:
@@ -228,10 +219,17 @@ if __name__ == "__main__":
     if args.resume:
         start_global_step = checkpoint["global_step"] + 1
 
-    episodic_return = 0
-    episodic_length = 0
     hidden_in = None
-    obs = env.reset()
+    obs, info = env.reset(seed=args.seed)
+    # Set RNG state for env
+    if args.resume:
+        env.np_random.bit_generator.state = checkpoint["rng_states"]["env_rng_state"]
+        env.action_space.np_random.bit_generator.state = checkpoint["rng_states"][
+            "env_action_space_rng_state"
+        ]
+        env.observation_space.np_random.bit_generator.state = checkpoint["rng_states"][
+            "env_obs_space_rng_state"
+        ]
     for global_step in range(start_global_step, args.total_timesteps):
         # Store values for data logging for each global step
         data_log = {}
@@ -248,31 +246,25 @@ if __name__ == "__main__":
             hidden_in = hidden_out
 
         # Take step in environment
-        next_obs, reward, done, info = env.step(action)
+        next_obs, reward, terminated, truncated, info = env.step(action)
 
         # Save data to replay buffer
-        rb.add(obs, next_obs, action, reward, done, info)
-
-        # Update episodic reward and length
-        episodic_return += reward
-        episodic_length += 1
+        rb.add(obs, action, next_obs, reward, terminated, truncated)
 
         # Update next obs
         obs = next_obs
 
         # Handle episode end, record rewards for plotting purposes
-        if done:
+        if terminated or truncated:
             print(
-                f"global_step={global_step}, episodic_return={episodic_return}",
+                f"global_step={global_step}, episodic_return={info['episode']['r'][0]}, episodic_length={info['episode']['l'][0]}",
                 flush=True,
             )
-            data_log["misc/episodic_return"] = episodic_return
-            data_log["misc/episodic_length"] = episodic_length
+            data_log["misc/episodic_return"] = info["episode"]["r"][0]
+            data_log["misc/episodic_length"] = info["episode"]["l"][0]
 
-            episodic_return = 0
-            episodic_length = 0
             hidden_in = None
-            obs = env.reset()
+            obs, info = env.reset()
 
         # ALGO LOGIC: training
         if global_step > args.learning_starts:
@@ -281,12 +273,10 @@ if __name__ == "__main__":
                 observations,
                 actions,
                 next_observations,
-                dones,
                 rewards,
+                terminateds,
                 seq_lengths,
-            ) = rb.sample_history(args.batch_size, args.history_length)
-            observations = observations.squeeze(2).long()
-            next_observations = next_observations.squeeze(2).long()
+            ) = rb.sample(args.batch_size)
             # ---------- update critic ---------- #
             # no grad because target networks are updated separately (pg. 6 of
             # updated SAC paper)
@@ -304,7 +294,9 @@ if __name__ == "__main__":
                 )
                 # calculate eq. 2 in updated SAC paper
                 next_q_value = rewards + (
-                    (1 - dones) * args.gamma * qf_next_target.sum(dim=2).unsqueeze(-1)
+                    (1 - terminateds)
+                    * args.gamma
+                    * qf_next_target.sum(dim=2).unsqueeze(-1)
                 )
 
             # calculate eq. 5 in updated SAC paper
@@ -410,8 +402,12 @@ if __name__ == "__main__":
                     )
 
             if global_step % 100 == 0:
-                data_log["losses/qf1_values"] = qf1_a_values.mean().item()
-                data_log["losses/qf2_values"] = qf2_a_values.mean().item()
+                data_log["losses/qf1_values"] = (
+                    torch.sum(qf1_a_values * q_loss_mask) / q_loss_mask_nonzero_elements
+                ).item()
+                data_log["losses/qf2_values"] = (
+                    torch.sum(qf2_a_values * q_loss_mask) / q_loss_mask_nonzero_elements
+                ).item()
                 data_log["losses/qf1_loss"] = qf1_loss.item()
                 data_log["losses/qf2_loss"] = qf2_loss.item()
                 data_log["losses/qf_loss"] = qf_loss.item() / 2.0
@@ -445,6 +441,7 @@ if __name__ == "__main__":
                 }
                 if args.autotune:
                     optimizers["a_optimizer"] = a_optimizer.state_dict()
+                    models["log_alpha"] = log_alpha
                 # Save replay buffer
                 rb_data = rb.save_buffer()
                 # Save random states, important for reproducibility

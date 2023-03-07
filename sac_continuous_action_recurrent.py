@@ -4,7 +4,7 @@ import random
 import time
 from distutils.util import strtobool
 
-import gym
+import gymnasium as gym
 import numpy as np
 import torch
 import torch.nn.functional as F
@@ -12,7 +12,7 @@ import torch.optim as optim
 
 import wandb
 from common.models import RecurrentContinuousActor, RecurrentContinuousCritic
-from common.replay_buffer import ReplayBuffer
+from common.replay_buffer import EpisodicReplayBuffer
 from common.utils import make_env, save, set_seed
 
 
@@ -25,8 +25,10 @@ def parse_args():
         help="seed of the experiment")
     parser.add_argument("--cuda", type=lambda x: bool(strtobool(x)), default=True, nargs="?", const=True,
         help="if toggled, cuda will be enabled by default")
-    parser.add_argument("--wandb-project-name", type=str, default="sac-continuous-action-recurrent",
-        help="the wandb's project name")
+    parser.add_argument("--wandb-project", type=str, default="sac-continuous-action-recurrent",
+        help="wandb project name")
+    parser.add_argument("--wandb-group", type=str, default=None,
+        help="wandb group name to use for run")
     parser.add_argument("--wandb-dir", type=str, default="./",
         help="the wandb directory")
     parser.add_argument("--capture-video", type=lambda x: bool(strtobool(x)), default=False, nargs="?", const=True,
@@ -92,26 +94,26 @@ if __name__ == "__main__":
         wandb.init(
             id=args.run_id,
             dir=args.wandb_dir,
-            project=args.wandb_project_name,
+            project=args.wandb_project,
             config=vars(args),
             name=run_name,
             resume="must",
             save_code=True,
             settings=wandb.Settings(code_dir="."),
+            group=args.wandb_group,
             mode="offline",
-            group=args.env_id,
         )
     else:
         wandb.init(
             id=run_id,
             dir=args.wandb_dir,
-            project=args.wandb_project_name,
+            project=args.wandb_project,
             config=vars(args),
             name=run_name,
             save_code=True,
             settings=wandb.Settings(code_dir="."),
+            group=args.wandb_group,
             mode="offline",
-            group=args.env_id,
         )
 
     # Set training device
@@ -138,16 +140,7 @@ if __name__ == "__main__":
             )
 
     # Env setup
-    env = make_env(args.env_id, args.seed, 0, args.capture_video, run_name)
-    # Set RNG state for env
-    if args.resume:
-        env.np_random.bit_generator.state = checkpoint["rng_states"]["env_rng_state"]
-        env.action_space.np_random.bit_generator.state = checkpoint["rng_states"][
-            "env_action_space_rng_state"
-        ]
-        env.observation_space.np_random.bit_generator.state = checkpoint["rng_states"][
-            "env_obs_space_rng_state"
-        ]
+    env = make_env(args.env_id, args.seed, args.capture_video, run_name)
     assert isinstance(
         env.action_space, gym.spaces.Box
     ), "only continuous action space is supported"
@@ -202,12 +195,9 @@ if __name__ == "__main__":
 
     # Initialize replay buffer
     env.observation_space.dtype = np.float32
-    rb = ReplayBuffer(
+    rb = EpisodicReplayBuffer(
         args.buffer_size,
-        env.observation_space,
-        env.action_space,
         device,
-        handle_timeout_termination=True,
     )
     # If resuming training, then load previous replay buffer
     if args.resume:
@@ -223,10 +213,17 @@ if __name__ == "__main__":
     if args.resume:
         start_global_step = checkpoint["global_step"] + 1
 
-    episodic_return = 0
-    episodic_length = 0
     hidden_in = None
-    obs = env.reset()
+    obs, info = env.reset(seed=args.seed)
+    # Set RNG state for env
+    if args.resume:
+        env.np_random.bit_generator.state = checkpoint["rng_states"]["env_rng_state"]
+        env.action_space.np_random.bit_generator.state = checkpoint["rng_states"][
+            "env_action_space_rng_state"
+        ]
+        env.observation_space.np_random.bit_generator.state = checkpoint["rng_states"][
+            "env_obs_space_rng_state"
+        ]
     for global_step in range(args.total_timesteps):
         # Store values for data logging for each global step
         data_log = {}
@@ -245,28 +242,25 @@ if __name__ == "__main__":
             hidden_in = hidden_out
 
         # Take step in environment
-        next_obs, reward, done, info = env.step(action)
+        next_obs, reward, terminated, truncated, info = env.step(action)
 
         # Save data to replay buffer
-        rb.add(obs, next_obs, action, reward, done, info)
-
-        # Update episodic reward and length
-        episodic_return += reward
-        episodic_length += 1
+        rb.add(obs, action, next_obs, reward, terminated, truncated)
 
         # Update next obs
         obs = next_obs
 
         # Handle episode end, record rewards for plotting purposes
-        if done:
-            print(f"global_step={global_step}, episodic_return={episodic_return}", flush=True)
-            data_log["misc/episodic_return"] = episodic_return
-            data_log["misc/episodic_length"] = episodic_length
+        if terminated or truncated:
+            print(
+                f"global_step={global_step}, episodic_return={info['episode']['r'][0]}, episodic_length={info['episode']['l'][0]}",
+                flush=True,
+            )
+            data_log["misc/episodic_return"] = info["episode"]["r"][0]
+            data_log["misc/episodic_length"] = info["episode"]["l"][0]
 
-            episodic_return = 0
-            episodic_length = 0
             hidden_in = None
-            obs = env.reset()
+            obs, info = env.reset()
 
         # ALGO LOGIC: training
         if global_step > args.learning_starts:
@@ -274,10 +268,11 @@ if __name__ == "__main__":
                 observations,
                 actions,
                 next_observations,
-                dones,
                 rewards,
+                terminateds,
                 seq_lengths,
-            ) = rb.sample_history(args.batch_size, history_length=args.history_length)
+            ) = rb.sample(args.batch_size)
+            # ---------- update critic ---------- #
             # no grad because target networks are updated separately (pg. 6 of
             # updated SAC paper)
             with torch.no_grad():
@@ -297,7 +292,9 @@ if __name__ == "__main__":
                     - alpha * next_state_log_pi
                 )
                 # calculate eq. 2 in updated SAC paper
-                next_q_value = rewards + (1 - dones) * args.gamma * (min_qf_next_target)
+                next_q_value = rewards + (1 - terminateds) * args.gamma * (
+                    min_qf_next_target
+                )
 
             # calculate eq. 5 in updated SAC paper
             qf1_a_values = qf1(observations, actions, seq_lengths)
@@ -391,8 +388,12 @@ if __name__ == "__main__":
                     )
 
             if global_step % 100 == 0:
-                data_log["losses/qf1_values"] = qf1_a_values.mean().item()
-                data_log["losses/qf2_values"] = qf2_a_values.mean().item()
+                data_log["losses/qf1_values"] = (
+                    torch.sum(qf1_a_values * q_loss_mask) / q_loss_mask_nonzero_elements
+                ).item()
+                data_log["losses/qf2_values"] = (
+                    torch.sum(qf2_a_values * q_loss_mask) / q_loss_mask_nonzero_elements
+                ).item()
                 data_log["losses/qf1_loss"] = qf1_loss.item()
                 data_log["losses/qf2_loss"] = qf2_loss.item()
                 data_log["losses/qf_loss"] = qf_loss.item() / 2.0
