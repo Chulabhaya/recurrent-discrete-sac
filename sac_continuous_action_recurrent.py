@@ -12,7 +12,7 @@ import torch.optim as optim
 
 import wandb
 from common.models import RecurrentContinuousActor, RecurrentContinuousCritic
-from common.replay_buffer import ReplayBuffer
+from common.replay_buffer import EpisodicReplayBuffer
 from common.utils import make_env, save, set_seed
 
 
@@ -195,10 +195,8 @@ if __name__ == "__main__":
 
     # Initialize replay buffer
     env.observation_space.dtype = np.float32
-    rb = ReplayBuffer(
+    rb = EpisodicReplayBuffer(
         args.buffer_size,
-        env.observation_space,
-        env.action_space,
         device,
     )
     # If resuming training, then load previous replay buffer
@@ -273,7 +271,7 @@ if __name__ == "__main__":
                 rewards,
                 terminateds,
                 seq_lengths,
-            ) = rb.sample_history(args.batch_size, args.history_length)
+            ) = rb.sample(args.batch_size)
             # ---------- update critic ---------- #
             # no grad because target networks are updated separately (pg. 6 of
             # updated SAC paper)

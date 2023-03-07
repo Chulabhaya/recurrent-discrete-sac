@@ -16,7 +16,7 @@ from common.models import (
     RecurrentDiscreteActorDiscreteObs,
     RecurrentDiscreteCriticDiscreteObs,
 )
-from common.replay_buffer import ReplayBuffer
+from common.replay_buffer import EpisodicReplayBuffer
 from common.utils import make_env, set_seed, save
 
 
@@ -45,6 +45,8 @@ def parse_args():
         help="total timesteps of the experiments")
     parser.add_argument("--maximum-episode-length", type=int, default=50,
         help="maximum length for episodes for gym POMDP environment")
+    parser.add_argument("--buffer-size", type=int, default=int(1e5),
+        help="the replay memory buffer size")
     parser.add_argument("--gamma", type=float, default=0.99,
         help="the discount factor gamma")
     parser.add_argument("--tau", type=float, default=0.005,
@@ -262,10 +264,8 @@ if __name__ == "__main__":
 
     # Initialize replay buffer
     env.observation_space.dtype = np.float32
-    rb = ReplayBuffer(
-        dataset["obs"].shape[0],
-        env.observation_space,
-        env.action_space,
+    rb = EpisodicReplayBuffer(
+        args.buffer_size,
         device,
     )
     rb.load_buffer(dataset)
@@ -292,8 +292,6 @@ if __name__ == "__main__":
             terminateds,
             seq_lengths,
         ) = rb.sample_history(args.batch_size)
-        observations = observations.squeeze(2).long()
-        next_observations = next_observations.squeeze(2).long()
         # ---------- update critic ---------- #
         # no grad because target networks are updated separately (pg. 6 of
         # updated SAC paper)

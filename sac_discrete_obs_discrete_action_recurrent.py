@@ -15,7 +15,7 @@ from common.models import (
     RecurrentDiscreteActorDiscreteObs,
     RecurrentDiscreteCriticDiscreteObs,
 )
-from common.replay_buffer import ReplayBuffer
+from common.replay_buffer import EpisodicReplayBuffer
 from common.utils import make_env, save, set_seed
 
 
@@ -52,8 +52,6 @@ def parse_args():
         help="target smoothing coefficient (default: 0.005)")
     parser.add_argument("--batch-size", type=int, default=256,
         help="the batch size of sample from the reply memory")
-    parser.add_argument("--history-length", type=int, default=None,
-        help="the observation sequence length (history) to use")
     parser.add_argument("--learning-starts", type=int, default=5e3,
         help="timestep to start learning")
     parser.add_argument("--policy-lr", type=float, default=3e-4,
@@ -78,7 +76,7 @@ def parse_args():
         help="how often to save checkpoints during training (in timesteps)")
     parser.add_argument("--resume", type=lambda x: bool(strtobool(x)), default=False, nargs="?", const=True,
         help="whether to resume training from a checkpoint")
-    parser.add_argument("--resume-checkpoint-path", type=str, default="trained_models/POMDP-heavenhell_1-episodic-v0__sac_discrete_obs_discrete_action_recurrent__vdz4prgp/global_step_5000.pth",
+    parser.add_argument("--resume-checkpoint-path", type=str, default="gymnasium_seed_4_global_step_120000.pth",
         help="path to checkpoint to resume training from")
     parser.add_argument("--run-id", type=str, default=None,
         help="wandb unique run id for resuming")
@@ -203,10 +201,8 @@ if __name__ == "__main__":
 
     # Initialize replay buffer
     env.observation_space.dtype = np.float32
-    rb = ReplayBuffer(
+    rb = EpisodicReplayBuffer(
         args.buffer_size,
-        env.observation_space,
-        env.action_space,
         device,
     )
     # If resuming training, then load previous replay buffer
@@ -280,9 +276,7 @@ if __name__ == "__main__":
                 rewards,
                 terminateds,
                 seq_lengths,
-            ) = rb.sample_history(args.batch_size, args.history_length)
-            observations = observations.squeeze(2).long()
-            next_observations = next_observations.squeeze(2).long()
+            ) = rb.sample(args.batch_size)
             # ---------- update critic ---------- #
             # no grad because target networks are updated separately (pg. 6 of
             # updated SAC paper)
@@ -422,7 +416,6 @@ if __name__ == "__main__":
                 data_log["misc/steps_per_second"] = int(
                     global_step / (time.time() - start_time)
                 )
-                data_log["misc/rb_pos"] = rb.pos
                 print("SPS:", int(global_step / (time.time() - start_time)), flush=True)
                 if args.autotune:
                     data_log["losses/alpha_loss"] = alpha_loss.item()
@@ -450,9 +443,7 @@ if __name__ == "__main__":
                     optimizers["a_optimizer"] = a_optimizer.state_dict()
                     models["log_alpha"] = log_alpha
                 # Save replay buffer
-                print("Saving checkpoint rb pos: {}".format(rb.pos), flush=True)
                 rb_data = rb.save_buffer()
-                print(rb_data["pos"], flush=True)
                 # Save random states, important for reproducibility
                 rng_states = {
                     "random_rng_state": random.getstate(),
