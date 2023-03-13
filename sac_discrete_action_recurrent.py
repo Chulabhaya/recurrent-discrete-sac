@@ -25,7 +25,7 @@ def parse_args():
         help="seed of the experiment")
     parser.add_argument("--cuda", type=lambda x: bool(strtobool(x)), default=True, nargs="?", const=True,
         help="if toggled, cuda will be enabled by default")
-    parser.add_argument("--wandb-project-name", type=str, default="sac-discrete-action-recurrent",
+    parser.add_argument("--wandb-project", type=str, default="sac-discrete-action-recurrent",
         help="wandb project name")
     parser.add_argument("--wandb-group", type=str, default=None,
         help="wandb group name to use for run")
@@ -220,7 +220,7 @@ if __name__ == "__main__":
         env.observation_space.np_random.bit_generator.state = checkpoint["rng_states"][
             "env_obs_space_rng_state"
         ]
-    for global_step in range(args.total_timesteps):
+    for global_step in range(start_global_step, args.total_timesteps):
         # Store values for data logging for each global step
         data_log = {}
 

@@ -224,7 +224,7 @@ if __name__ == "__main__":
         env.observation_space.np_random.bit_generator.state = checkpoint["rng_states"][
             "env_obs_space_rng_state"
         ]
-    for global_step in range(args.total_timesteps):
+    for global_step in range(start_global_step, args.total_timesteps):
         # Store values for data logging for each global step
         data_log = {}
 

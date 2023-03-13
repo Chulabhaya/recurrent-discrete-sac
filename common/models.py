@@ -527,7 +527,7 @@ class DiscreteActor(nn.Module):
 
         return action_probs
 
-    def evaluate(self, x, epsilon=1e-6):
+    def get_action(self, x, epsilon=1e-6):
         """
         Calculates actions by sampling from action distribution.
 
@@ -556,27 +556,7 @@ class DiscreteActor(nn.Module):
         z = action_probs == 0.0
         z = z.float() * 1e-8
         log_action_probs = torch.log(action_probs + z)
-        return action.detach().cpu(), action_probs, log_action_probs
-
-    def get_deterministic_action(self, x):
-        """
-        Calculates actions by sampling from action distribution.
-        Not used for learning.
-
-        Parameters
-        ----------
-        x : tensor
-            Action probabilities.
-
-        Returns
-        -------
-        action : tensor
-            Sampled action from action distribution.
-        """
-        action_probs = self.forward(x)
-        dist = Categorical(action_probs)
-        action = dist.sample().to(x.device)
-        return action.detach().cpu()
+        return action, action_probs, log_action_probs
 
 
 class RecurrentDiscreteCriticDiscreteObs(nn.Module):
@@ -797,7 +777,7 @@ class DiscreteActorDiscreteObs(nn.Module):
 
         return action_probs
 
-    def evaluate(self, x, epsilon=1e-6):
+    def get_action(self, x, epsilon=1e-6):
         """
         Calculates actions by sampling from action distribution.
 
@@ -826,24 +806,4 @@ class DiscreteActorDiscreteObs(nn.Module):
         z = action_probs == 0.0
         z = z.float() * 1e-8
         log_action_probs = torch.log(action_probs + z)
-        return action.detach().cpu(), action_probs, log_action_probs
-
-    def get_deterministic_action(self, x):
-        """
-        Calculates actions by sampling from action distribution.
-        Not used for learning.
-
-        Parameters
-        ----------
-        x : tensor
-            Action probabilities.
-
-        Returns
-        -------
-        action : tensor
-            Sampled action from action distribution.
-        """
-        action_probs = self.forward(x)
-        dist = Categorical(action_probs)
-        action = dist.sample().to(x.device)
-        return action.detach().cpu()
+        return action, action_probs, log_action_probs
