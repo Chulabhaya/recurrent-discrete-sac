@@ -325,7 +325,7 @@ class EpisodicReplayBuffer:
             batch_obs.append(torch.as_tensor(np.array(self.obs[batch_inds[i]])))
             batch_actions.append(torch.as_tensor(np.array(self.actions[batch_inds[i]])))
             batch_next_obs.append(torch.as_tensor(np.array(self.next_obs[batch_inds[i]])))
-            batch_rewards.append(torch.as_tensor(np.array(self.rewards[batch_inds[i]])))
+            batch_rewards.append(torch.as_tensor(np.array(self.rewards[batch_inds[i]], dtype=np.float32)))
             batch_terminateds.append(torch.as_tensor(np.array(self.terminateds[batch_inds[i]])))
 
         # Create padded arrays of history
