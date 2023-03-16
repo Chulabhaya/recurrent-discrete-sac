@@ -4,7 +4,9 @@ import random
 import gymnasium as gym
 import numpy as np
 import torch
+
 import gymnasium_pomdps
+import simple_pomdps
 
 
 def make_env(env_id, seed, capture_video, run_name, max_episode_len=None):
