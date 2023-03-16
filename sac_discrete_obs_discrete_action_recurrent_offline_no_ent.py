@@ -121,15 +121,15 @@ def eval_policy(
         obs, info = env.reset(seed=seed + seed_offset)
         for _ in range(num_evals):
             terminated, truncated = False, False
-            hidden_in = None
+            in_hidden = None
             while not (truncated or terminated):
                 # Get action
                 seq_lengths = torch.LongTensor([1])
-                action, _, _, hidden_out = actor.get_action(
-                    torch.tensor(obs).to(device).view(1, -1), seq_lengths, hidden_in
+                action, _, _, out_hidden = actor.get_action(
+                    torch.tensor(obs).to(device).view(1, -1), seq_lengths, in_hidden
                 )
                 action = action.view(-1).detach().cpu().numpy()[0]
-                hidden_in = hidden_out
+                in_hidden = out_hidden
 
                 # Take step in environment
                 next_obs, reward, terminated, truncated, info = env.step(action)

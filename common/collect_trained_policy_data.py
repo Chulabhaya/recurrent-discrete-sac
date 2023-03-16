@@ -108,7 +108,9 @@ def main():
     actor.load_state_dict(checkpoint["model_state_dict"]["actor_state_dict"])
 
     # Collect dataset in a replay buffer
-    rb = collect_trained_policy_data(env, actor, device, args.seed, args.total_timesteps)
+    rb = collect_trained_policy_data(
+        env, actor, device, args.seed, args.total_timesteps
+    )
 
     # Get dictionary of replay buffer data
     rb_data = rb.save_buffer()

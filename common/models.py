@@ -11,8 +11,7 @@ LOG_STD_MIN = -5
 
 
 class ContinuousCritic(nn.Module):
-    """Continuous soft Q-network model for continous SAC.
-    """
+    """Continuous soft Q-network model for continous SAC."""
 
     def __init__(self, env):
         """Initialize the critic model.
@@ -55,8 +54,7 @@ class ContinuousCritic(nn.Module):
 
 
 class ContinuousActor(nn.Module):
-    """Continuous actor model for continous SAC.
-    """
+    """Continuous actor model for continous SAC."""
 
     def __init__(self, env):
         """Initialize the actor model.
@@ -147,8 +145,7 @@ class ContinuousActor(nn.Module):
 
 
 class RecurrentContinuousCritic(nn.Module):
-    """Recurrent continuous soft Q-network model for continous SAC for POMDPs.
-    """
+    """Recurrent continuous soft Q-network model for continous SAC for POMDPs."""
 
     def __init__(self, env):
         """Initialize the critic model.
@@ -200,8 +197,7 @@ class RecurrentContinuousCritic(nn.Module):
 
 
 class RecurrentContinuousActor(nn.Module):
-    """Recurrent continuous actor model for continous SAC for POMDPs.
-    """
+    """Recurrent continuous actor model for continous SAC for POMDPs."""
 
     def __init__(self, env):
         """Initialize the actor model.

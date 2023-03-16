@@ -209,7 +209,7 @@ if __name__ == "__main__":
     if args.resume:
         start_global_step = checkpoint["global_step"] + 1
 
-    hidden_in = None
+    in_hidden = None
     obs, info = env.reset(seed=args.seed)
     # Set RNG state for env
     if args.resume:
@@ -229,13 +229,13 @@ if __name__ == "__main__":
             action = env.action_space.sample()
         else:
             seq_lengths = torch.LongTensor([1])
-            action, _, _, hidden_out = actor.get_action(
+            action, _, _, out_hidden = actor.get_action(
                 torch.tensor(obs, dtype=torch.float32).to(device).view(1, 1, -1),
                 seq_lengths,
-                hidden_in,
+                in_hidden,
             )
             action = action.view(-1).detach().cpu().numpy()[0]
-            hidden_in = hidden_out
+            in_hidden = out_hidden
 
         # Take step in environment
         next_obs, reward, terminated, truncated, info = env.step(action)
@@ -255,7 +255,7 @@ if __name__ == "__main__":
             data_log["misc/episodic_return"] = info["episode"]["r"][0]
             data_log["misc/episodic_length"] = info["episode"]["l"][0]
 
-            hidden_in = None
+            in_hidden = None
             obs, info = env.reset()
 
         # ALGO LOGIC: training.
