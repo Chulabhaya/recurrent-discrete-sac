@@ -37,7 +37,7 @@ def parse_args():
     # Algorithm specific arguments
     parser.add_argument("--env-id", type=str, default="CartPole-v0",
         help="the id of the environment")
-    parser.add_argument("--total-timesteps", type=int, default=100000,
+    parser.add_argument("--total-timesteps", type=int, default=50000,
         help="total timesteps of the experiments")
     parser.add_argument("--buffer-size", type=int, default=int(1e5),
         help="the replay memory buffer size")
@@ -69,9 +69,9 @@ def parse_args():
         help="path to directory to save checkpoints in")
     parser.add_argument("--checkpoint-interval", type=int, default=5000,
         help="how often to save checkpoints during training (in timesteps)")
-    parser.add_argument("--resume", type=lambda x: bool(strtobool(x)), default=False, nargs="?", const=True,
+    parser.add_argument("--resume", type=lambda x: bool(strtobool(x)), default=True, nargs="?", const=True,
         help="whether to resume training from a checkpoint")
-    parser.add_argument("--resume-checkpoint-path", type=str, default=None,
+    parser.add_argument("--resume-checkpoint-path", type=str, default="./trained_models/CartPole-v0__sac_discrete_action__1__1679322861__hx7h0udf/global_step_20000.pth",
         help="path to checkpoint to resume training from")
     parser.add_argument("--run-id", type=str, default=None,
         help="wandb unique run id for resuming")
@@ -156,10 +156,29 @@ if __name__ == "__main__":
     )
     actor_optimizer = optim.Adam(list(actor.parameters()), lr=args.policy_lr)
 
+    # If resuming training, load models and optimizers
+    if args.resume:
+        actor.load_state_dict(checkpoint["model_state_dict"]["actor_state_dict"])
+        qf1.load_state_dict(checkpoint["model_state_dict"]["qf1_state_dict"])
+        qf2.load_state_dict(checkpoint["model_state_dict"]["qf2_state_dict"])
+        qf1_target.load_state_dict(
+            checkpoint["model_state_dict"]["qf1_target_state_dict"]
+        )
+        qf2_target.load_state_dict(
+            checkpoint["model_state_dict"]["qf2_target_state_dict"]
+        )
+        q_optimizer.load_state_dict(checkpoint["optimizer_state_dict"]["q_optimizer"])
+        actor_optimizer.load_state_dict(
+            checkpoint["optimizer_state_dict"]["actor_optimizer"]
+        )
+
     # Automatic entropy tuning
     if args.autotune:
         target_entropy = -0.3 * torch.log(1 / torch.tensor(env.action_space.n))
-        log_alpha = torch.zeros(1, requires_grad=True, device=device)
+        if args.resume:
+            log_alpha = checkpoint["model_state_dict"]["log_alpha"]
+        else:
+            log_alpha = torch.zeros(1, requires_grad=True, device=device)
         a_optimizer = optim.Adam([log_alpha], lr=args.q_lr, eps=1e-4)
         # If resuming, load optimizer
         if args.resume:
@@ -377,6 +396,7 @@ if __name__ == "__main__":
                 }
                 if args.autotune:
                     optimizers["a_optimizer"] = a_optimizer.state_dict()
+                    models["log_alpha"] = log_alpha
                 # Save replay buffer
                 rb_data = rb.save_buffer()
                 # Save random states, important for reproducibility

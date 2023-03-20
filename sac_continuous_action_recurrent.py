@@ -181,7 +181,10 @@ if __name__ == "__main__":
         target_entropy = -torch.prod(
             torch.Tensor(env.action_space.shape).to(device)
         ).item()
-        log_alpha = torch.zeros(1, requires_grad=True, device=device)
+        if args.resume:
+            log_alpha = checkpoint["model_state_dict"]["log_alpha"]
+        else:
+            log_alpha = torch.zeros(1, requires_grad=True, device=device)
         a_optimizer = optim.Adam([log_alpha], lr=args.q_lr)
         # If resuming, load optimizer
         if args.resume:
