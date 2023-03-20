@@ -312,7 +312,7 @@ if __name__ == "__main__":
                                 _,
                                 state_action_probs,
                                 state_action_log_pis,
-                            ) = actor.evaluate(observations)
+                            ) = actor.get_action(observations)
                         # calculate eq. 18 in updated SAC paper
                         alpha_loss = state_action_probs * (
                             -log_alpha * (state_action_log_pis + target_entropy)
@@ -346,7 +346,7 @@ if __name__ == "__main__":
                 data_log["losses/qf2_values"] = qf2_a_values.mean().item()
                 data_log["losses/qf1_loss"] = qf1_loss.item()
                 data_log["losses/qf2_loss"] = qf2_loss.item()
-                data_log["losses/qf_loss"] = qf_loss.item() / 2.0
+                data_log["losses/qf_loss"] = qf_loss.item()
                 data_log["losses/actor_loss"] = actor_loss.item()
                 data_log["losses/alpha"] = alpha
                 data_log["misc/steps_per_second"] = int(
