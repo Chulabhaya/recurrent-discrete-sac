@@ -53,8 +53,6 @@ def parse_args():
         help="target smoothing coefficient (default: 0.005)")
     parser.add_argument("--batch-size", type=int, default=256,
         help="the batch size of sample from the reply memory")
-    parser.add_argument("--eval-freq", type=int, default=1000,
-        help="timestep frequency at which to run evaluation")
     parser.add_argument("--policy-lr", type=float, default=3e-4,
         help="the learning rate of the policy network optimizer")
     parser.add_argument("--q-lr", type=float, default=1e-3,
@@ -62,13 +60,15 @@ def parse_args():
     parser.add_argument("--policy-frequency", type=int, default=2,
         help="the frequency of training policy (delayed)")
     parser.add_argument("--target-network-frequency", type=int, default=1, # Denis Yarats' implementation delays this by 2.
-        help="the frequency of updates for the target nerworks")
+        help="the frequency of updates for the target networks")
 
     # Offline training specific arguments
     parser.add_argument("--dataset-path", type=str, default="heavenhell_1_expert_data.pkl",
         help="path to dataset for training")
     parser.add_argument("--num-evals", type=int, default=10,
         help="number of evaluation episodes to generate per evaluation during training")
+    parser.add_argument("--eval-freq", type=int, default=1000,
+        help="timestep frequency at which to run evaluation")
 
     # Checkpointing specific arguments
     parser.add_argument("--save", type=lambda x:bool(strtobool(x)), default=True, nargs="?", const=True,
