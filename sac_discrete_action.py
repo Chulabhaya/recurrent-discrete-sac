@@ -69,7 +69,7 @@ def parse_args():
         help="path to directory to save checkpoints in")
     parser.add_argument("--checkpoint-interval", type=int, default=5000,
         help="how often to save checkpoints during training (in timesteps)")
-    parser.add_argument("--resume", type=lambda x: bool(strtobool(x)), default=True, nargs="?", const=True,
+    parser.add_argument("--resume", type=lambda x: bool(strtobool(x)), default=False, nargs="?", const=True,
         help="whether to resume training from a checkpoint")
     parser.add_argument("--resume-checkpoint-path", type=str, default="./trained_models/CartPole-v0__sac_discrete_action__1__1679322861__hx7h0udf/global_step_20000.pth",
         help="path to checkpoint to resume training from")
