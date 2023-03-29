@@ -37,7 +37,7 @@ def parse_args():
     # Algorithm specific arguments
     parser.add_argument("--env-id", type=str, default="CartPole-v0",
         help="the id of the environment")
-    parser.add_argument("--total-timesteps", type=int, default=50000,
+    parser.add_argument("--total-timesteps", type=int, default=200500,
         help="total timesteps of the experiments")
     parser.add_argument("--buffer-size", type=int, default=int(1e5),
         help="the replay memory buffer size")
@@ -84,7 +84,8 @@ def parse_args():
 if __name__ == "__main__":
     args = parse_args()
     run_name = f"{args.env_id}__{args.exp_name}__{args.seed}__{int(time.time())}"
-    run_id = wandb.util.generate_id()
+    wandb_id = wandb.util.generate_id()
+    run_id = f"{run_name}__{wandb_id}"
 
     # If a unique wandb run id is given, then resume from that, otherwise
     # generate new run for resuming

@@ -160,7 +160,8 @@ def eval_policy(
 if __name__ == "__main__":
     args = parse_args()
     run_name = f"{args.env_id}__{args.exp_name}"
-    run_id = wandb.util.generate_id()
+    wandb_id = wandb.util.generate_id()
+    run_id = f"{run_name}__{wandb_id}"
 
     # If a unique wandb run id is given, then resume from that, otherwise
     # generate new run for resuming

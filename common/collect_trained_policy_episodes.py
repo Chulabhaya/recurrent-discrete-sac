@@ -1,6 +1,7 @@
 import argparse
 import pickle
 from distutils.util import strtobool
+import random
 
 import torch
 
@@ -9,7 +10,7 @@ from replay_buffer import EpisodicReplayBuffer
 from utils import make_env, set_seed
 
 
-def collect_trained_policy_data(env, actor, device, seed, total_timesteps):
+def collect_trained_policy_data(env, actor, device, seed, total_timesteps, epsilon):
     # Initialize replay buffer for storing data
     rb = EpisodicReplayBuffer(
         total_timesteps,
@@ -25,13 +26,16 @@ def collect_trained_policy_data(env, actor, device, seed, total_timesteps):
     episodic_count = 0
     global_step = 0
     for global_step in range(0, total_timesteps):
-        # Get action from scripted policy
-        seq_lengths = torch.LongTensor([1])
-        action, _, _, hidden_out = actor.get_action(
-            torch.tensor(obs).to(device).view(1, -1), seq_lengths, hidden_in
-        )
-        action = action.view(-1).detach().cpu().numpy()[0]
-        hidden_in = hidden_out
+        # Take either random or scripted action
+        if random.random() < epsilon:
+            action = env.action_space.sample()
+        else:
+            seq_lengths = torch.LongTensor([1])
+            action, _, _, hidden_out = actor.get_action(
+                torch.tensor(obs).to(device).view(1, -1), seq_lengths, hidden_in
+            )
+            action = action.view(-1).detach().cpu().numpy()[0]
+            hidden_in = hidden_out
 
         # Take action in environment
         next_obs, reward, terminated, truncated, info = env.step(action)
@@ -70,8 +74,10 @@ def parse_args():
         help="maximum length for episodes for gym POMDP environment")
     parser.add_argument("--total-timesteps", type=int, default=100000,
         help="total timesteps of data to gather from policy")
-    parser.add_argument("--checkpoint", type=str, default="/home/chulabhaya/phd/research/data/3-23-23_heavenhell1_sac_expert_policy.pth",
+    parser.add_argument("--checkpoint", type=str, default="/home/chulabhaya/phd/research/data/heavenhell_1/3-23-23_heavenhell_1_sac_expert_policy.pth",
         help="path to checkpoint with trained policy")
+    parser.add_argument("--epsilon", type=float, default=1.0,
+        help="random action sampling percentage")
 
     args = parser.parse_args()
     # fmt: on
@@ -107,14 +113,14 @@ def main():
 
     # Collect dataset in a replay buffer
     rb = collect_trained_policy_data(
-        env, actor, device, args.seed, args.total_timesteps
+        env, actor, device, args.seed, args.total_timesteps, args.epsilon
     )
 
     # Get dictionary of replay buffer data
     rb_data = rb.save_buffer()
 
     # Save out dictionary into pickle file
-    f = open("3-23-23_heavenhell1_sac_expert_policy_expert_data.pkl", "wb")
+    f = open("3-23-23_heavenhell_1_sac_expert_policy_100_percent_random_data.pkl", "wb")
     pickle.dump(rb_data, f)
     f.close()
 

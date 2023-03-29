@@ -10,7 +10,9 @@ from replay_buffer import ReplayBuffer
 from utils import make_env, set_seed
 
 
-def collect_trained_policy_data(env, actor, device, seed, total_timesteps, random_action):
+def collect_trained_policy_data(
+    env, actor, device, seed, total_timesteps, epsilon
+):
     # Initialize replay buffer for storing data
     rb = ReplayBuffer(
         total_timesteps,
@@ -28,7 +30,7 @@ def collect_trained_policy_data(env, actor, device, seed, total_timesteps, rando
     global_step = 0
     for global_step in range(0, total_timesteps):
         # Take either random or scripted action
-        if random.random() < random_action:
+        if random.random() < epsilon:
             action = env.action_space.sample()
         else:
             action, _, _ = actor.get_action(torch.Tensor(obs).to(device))
@@ -70,8 +72,8 @@ def parse_args():
         help="total timesteps of data to gather from policy")
     parser.add_argument("--checkpoint", type=str, default="/home/chulabhaya/phd/research/data/3-27-23_cartpole_v0_sac_expert_policy.pth",
         help="path to checkpoint with trained policy")
-    parser.add_argument("--random-action", type=float, default=1.0,
-        help="what percentage to sample a random action instead of using specified policy")
+    parser.add_argument("--epsilon", type=float, default=1.0,
+        help="random action sampling percentage")
 
 
     args = parser.parse_args()
@@ -107,7 +109,7 @@ def main():
 
     # Collect dataset in a replay buffer
     rb = collect_trained_policy_data(
-        env, actor, device, args.seed, args.total_timesteps, args.random_action
+        env, actor, device, args.seed, args.total_timesteps, args.epsilon
     )
 
     # Get dictionary of replay buffer data
