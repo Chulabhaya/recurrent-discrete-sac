@@ -42,7 +42,6 @@ def make_env(env_id, seed, capture_video, run_name, max_episode_len=None):
 
 
 def save(
-    run_name,
     run_id,
     checkpoint_dir,
     global_step,
@@ -53,7 +52,7 @@ def save(
 ):
     import os
 
-    save_dir = checkpoint_dir + run_name + "__" + run_id + "/"
+    save_dir = checkpoint_dir + run_id + "/"
 
     if not os.path.exists(save_dir):
         os.makedirs(save_dir)

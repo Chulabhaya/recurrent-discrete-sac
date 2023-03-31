@@ -463,7 +463,6 @@ if __name__ == "__main__":
                     ] = torch.cuda.get_rng_state_all()
 
                 save(
-                    wandb.run.name,
                     run_id,
                     args.save_checkpoint_dir,
                     global_step,
