@@ -161,7 +161,7 @@ if __name__ == "__main__":
     args = parse_args()
     run_name = f"{args.exp_name}"
     wandb_id = wandb.util.generate_id()
-    run_id = f"{run_name}__{wandb_id}"
+    run_id = f"{run_name}_{wandb_id}"
 
     # If a unique wandb run id is given, then resume from that, otherwise
     # generate new run for resuming
