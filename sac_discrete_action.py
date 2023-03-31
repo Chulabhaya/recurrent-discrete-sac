@@ -29,7 +29,7 @@ def parse_args():
         help="wandb project name")
     parser.add_argument("--wandb-group", type=str, default=None,
         help="wandb group name to use for run")
-    parser.add_argument("--wandb-dir", type=str, default="./",
+    parser.add_argument("--wandb-dir", type=str, default="./test",
         help="the wandb directory")
     parser.add_argument("--capture-video", type=lambda x: bool(strtobool(x)), default=False, nargs="?", const=True,
         help="whether to capture videos of the agent performances (check out `videos` folder)")
@@ -71,9 +71,9 @@ def parse_args():
         help="how often to save checkpoints during training (in timesteps)")
     parser.add_argument("--resume", type=lambda x: bool(strtobool(x)), default=False, nargs="?", const=True,
         help="whether to resume training from a checkpoint")
-    parser.add_argument("--resume-checkpoint-path", type=str, default="./trained_models/CartPole-v0__sac_discrete_action__1__1679322861__hx7h0udf/global_step_20000.pth",
+    parser.add_argument("--resume-checkpoint-path", type=str, default="./trained_models/CartPole-v0__sac_discrete_action__1__1680268581__07jx3mba/global_step_35000.pth",
         help="path to checkpoint to resume training from")
-    parser.add_argument("--run-id", type=str, default=None,
+    parser.add_argument("--run-id", type=str, default="CartPole-v0__sac_discrete_action__1__1680268581__07jx3mba",
         help="wandb unique run id for resuming")
 
     args = parser.parse_args()
@@ -83,7 +83,7 @@ def parse_args():
 
 if __name__ == "__main__":
     args = parse_args()
-    run_name = f"{args.env_id}__{args.exp_name}__{args.seed}__{int(time.time())}"
+    run_name = f"{args.exp_name}"
     wandb_id = wandb.util.generate_id()
     run_id = f"{run_name}__{wandb_id}"
 
@@ -94,12 +94,7 @@ if __name__ == "__main__":
             id=args.run_id,
             dir=args.wandb_dir,
             project=args.wandb_project,
-            config=vars(args),
-            name=run_name,
             resume="must",
-            save_code=True,
-            settings=wandb.Settings(code_dir="."),
-            group=args.wandb_group,
             mode="offline",
         )
     else:

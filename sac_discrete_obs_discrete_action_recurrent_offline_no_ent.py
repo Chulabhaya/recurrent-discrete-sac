@@ -155,7 +155,7 @@ def eval_policy(
 
 if __name__ == "__main__":
     args = parse_args()
-    run_name = f"{args.env_id}__{args.exp_name}"
+    run_name = f"{args.exp_name}"
     wandb_id = wandb.util.generate_id()
     run_id = f"{run_name}__{wandb_id}"
 
@@ -166,12 +166,7 @@ if __name__ == "__main__":
             id=args.run_id,
             dir=args.wandb_dir,
             project=args.wandb_project,
-            config=vars(args),
-            name=run_name,
             resume="must",
-            save_code=True,
-            settings=wandb.Settings(code_dir="."),
-            group=args.wandb_group,
             mode="offline",
         )
     else:
