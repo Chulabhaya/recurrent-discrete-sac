@@ -274,15 +274,17 @@ if __name__ == "__main__":
                     next_observations
                 )
                 # two Q-value estimates for reducing overestimation bias (pg. 8 of updated SAC paper)
-                qf1_next_target = qf1_target(next_observations)
-                qf2_next_target = qf2_target(next_observations)
-                min_qf_next_target = torch.min(qf1_next_target, qf2_next_target)
+                qf1_next_target_values = qf1_target(next_observations)
+                qf2_next_target_values = qf2_target(next_observations)
+                min_qf_next_target_values = torch.min(
+                    qf1_next_target_values, qf2_next_target_values
+                )
                 # calculate eq. 3 in updated SAC paper
                 qf_next_target = next_state_action_probs * (
-                    min_qf_next_target - alpha * next_state_log_pis
+                    min_qf_next_target_values - alpha * next_state_log_pis
                 )
                 # calculate eq. 2 in updated SAC paper
-                next_q_value = rewards + (
+                next_q_values = rewards + (
                     (1 - terminateds)
                     * args.gamma
                     * qf_next_target.sum(dim=1).unsqueeze(-1)
@@ -291,8 +293,8 @@ if __name__ == "__main__":
             # calculate eq. 5 in updated SAC paper
             qf1_a_values = qf1(observations).gather(1, actions)
             qf2_a_values = qf2(observations).gather(1, actions)
-            qf1_loss = F.mse_loss(qf1_a_values, next_q_value)
-            qf2_loss = F.mse_loss(qf2_a_values, next_q_value)
+            qf1_loss = F.mse_loss(qf1_a_values, next_q_values)
+            qf2_loss = F.mse_loss(qf2_a_values, next_q_values)
             qf_loss = qf1_loss + qf2_loss
 
             # calculate eq. 6 in updated SAC paper
