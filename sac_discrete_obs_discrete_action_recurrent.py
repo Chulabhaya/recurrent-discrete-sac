@@ -95,8 +95,9 @@ if __name__ == "__main__":
     # If a unique wandb run id is given, then resume from that, otherwise
     # generate new run for resuming
     if args.resume and args.run_id is not None:
+        run_id = args.run_id
         wandb.init(
-            id=args.run_id,
+            id=run_id,
             dir=args.wandb_dir,
             project=args.wandb_project,
             resume="must",

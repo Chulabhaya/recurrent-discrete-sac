@@ -54,6 +54,9 @@ def save(
 
     if not os.path.exists(save_dir):
         os.makedirs(save_dir)
+        # Prevent permission issues when writing to this directory
+        # after resuming a training job
+        os.chmod(save_dir, 0o777)
 
     save_path = save_dir + "global_step_" + str(global_step) + ".pth"
     torch.save(
