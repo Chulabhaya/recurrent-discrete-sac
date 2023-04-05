@@ -33,7 +33,7 @@ def collect_trained_policy_data(
         if random.random() < epsilon:
             action = env.action_space.sample()
         else:
-            action, _, _ = actor.get_action(torch.Tensor(obs).to(device))
+            action, _, _ = actor.get_actions(torch.Tensor(obs).to(device))
             action = action.detach().cpu().numpy()
 
         # Take action in environment

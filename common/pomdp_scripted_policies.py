@@ -9,7 +9,7 @@ class HeavenHell2ScriptedPolicy:
     def __init__(self) -> None:
         self.heaven_side = None
 
-    def get_action(self, observation: int, prev_done: bool) -> int:
+    def get_actions(self, observation: int, prev_done: bool) -> int:
         """Returns the optimal action given an observation from
         a HeavenHell environment.
 
@@ -120,7 +120,7 @@ class HeavenHell1ScriptedPolicy:
     def __init__(self) -> None:
         self.heaven_side = None
 
-    def get_action(self, env, observation: int, prev_done: bool, epsilon: float) -> int:
+    def get_actions(self, env, observation: int, prev_done: bool, epsilon: float) -> int:
         """Returns the optimal action given an observation from
         a HeavenHell environment.
 
@@ -274,7 +274,7 @@ def collect_episodes_scripted_policy(
     episode_timestep = 0
     while episode_count < num_episodes:
         # Get action from scripted policy
-        action = agent.get_action(env, obs, done, epsilon)
+        action = agent.get_actions(env, obs, done, epsilon)
 
         # Take action in environment
         next_obs, reward, terminated, truncated, info = env.step(action)

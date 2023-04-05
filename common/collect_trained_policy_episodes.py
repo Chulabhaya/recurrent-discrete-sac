@@ -31,7 +31,7 @@ def collect_trained_policy_data(env, actor, device, seed, total_timesteps, epsil
             action = env.action_space.sample()
         else:
             seq_lengths = torch.LongTensor([1])
-            action, _, _, hidden_out = actor.get_action(
+            action, _, _, hidden_out = actor.get_actions(
                 torch.tensor(obs).to(device).view(1, -1), seq_lengths, hidden_in
             )
             action = action.view(-1).detach().cpu().numpy()[0]

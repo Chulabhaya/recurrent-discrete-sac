@@ -30,27 +30,28 @@ class ContinuousCritic(nn.Module):
         self.fc2 = nn.Linear(256, 256)
         self.fc3 = nn.Linear(256, 1)
 
-    def forward(self, state, action):
+    def forward(self, states, actions):
         """
-        Calculates the Q-value of a given state-action pair.
+        Calculates the Q-values of state-action pairs.
 
         Parameters
         ----------
-        state : tensor
-            State or observation.
-        action : tensor
-            Action.
+        states : tensor
+            States or observations.
+        actions : tensor
+            Actions.
 
         Returns
         -------
-        q_value : tensor
-            Q-value for given state-action pair.
+        q_values : tensor
+            Q-values for given state-action pairs.
         """
-        x = torch.cat([state, action], 1)
+        x = torch.cat([states, actions], 1)
         x = F.relu(self.fc1(x))
         x = F.relu(self.fc2(x))
-        q_value = self.fc3(x)
-        return q_value
+        q_values = self.fc3(x)
+
+        return q_values
 
 
 class ContinuousActor(nn.Module):
@@ -85,63 +86,64 @@ class ContinuousActor(nn.Module):
             ),
         )
 
-    def forward(self, state):
+    def forward(self, states):
         """
-        Calculates the mean and standard deviation of the action distribution.
+        Calculates means and log stds of action distributions generated from input states.
 
         Parameters
         ----------
-        state : tensor
-            State or observation.
+        states : tensor
+            States or observations.
 
         Returns
         -------
-        mean : tensor
-            Mean of action distribution.
-        log_std : tensor
-            Log of the standard deviation of the action distribution.
+        means : tensor
+            Means of action distributions.
+        log_stds : tensor
+            Log stds of action distributions.
         """
-        x = F.relu(self.fc1(state))
+        x = F.relu(self.fc1(states))
         x = F.relu(self.fc2(x))
-        mean = self.fc_mean(x)
-        log_std = self.fc_logstd(x)
-        log_std = torch.tanh(log_std)
-        log_std = LOG_STD_MIN + 0.5 * (LOG_STD_MAX - LOG_STD_MIN) * (
-            log_std + 1
+        means = self.fc_mean(x)
+        log_stds = self.fc_logstd(x)
+        log_stds = torch.tanh(log_stds)
+        log_stds = LOG_STD_MIN + 0.5 * (LOG_STD_MAX - LOG_STD_MIN) * (
+            log_stds + 1
         )  # From SpinUp / Denis Yarats
 
-        return mean, log_std
+        return means, log_stds
 
-    def get_action(self, state):
+    def get_actions(self, states):
         """
         Calculates actions by sampling from action distribution.
 
         Parameters
         ----------
-        state : tensor
-            State or observation.
+        states : tensor
+            States or observations.
 
         Returns
         -------
-        action : tensor
-            Sampled action from action distribution.
-        log_prob : tensor
-            Log of action probabilities, used for entropy.
-        mean : tensor
-            Mean of action distribution.
+        actions : tensor
+            Sampled actions from action distributions.
+        log_probs : tensor
+            Logs of action probabilities, used for entropy.
+        means : tensor
+            Means of action distributions.
         """
-        mean, log_std = self(state)
-        std = log_std.exp()
-        normal = torch.distributions.Normal(mean, std)
+        means, log_stds = self.forward(states)
+        stds = log_stds.exp()
+        normal = torch.distributions.Normal(means, stds)
         x_t = normal.rsample()  # for reparameterization trick (mean + std * N(0,1))
         y_t = torch.tanh(x_t)
-        action = y_t * self.action_scale + self.action_bias
-        log_prob = normal.log_prob(x_t)
+        actions = y_t * self.action_scale + self.action_bias
+        log_probs = normal.log_prob(x_t)
         # Enforcing Action Bound
-        log_prob -= torch.log(self.action_scale * (1 - y_t.pow(2)) + 1e-6)
-        log_prob = log_prob.sum(1, keepdim=True)
-        mean = torch.tanh(mean) * self.action_scale + self.action_bias
-        return action, log_prob, mean
+        log_probs -= torch.log(self.action_scale * (1 - y_t.pow(2)) + 1e-6)
+        log_probs = log_probs.sum(1, keepdim=True)
+        means = torch.tanh(means) * self.action_scale + self.action_bias
+
+        return actions, log_probs, means
 
 
 class RecurrentContinuousCritic(nn.Module):
@@ -165,25 +167,25 @@ class RecurrentContinuousCritic(nn.Module):
         self.fc2 = nn.Linear(256, 256)
         self.fc3 = nn.Linear(256, 1)
 
-    def forward(self, state, action, seq_lengths):
+    def forward(self, states, actions, seq_lengths):
         """
-        Calculates the Q-value of a given state-action pair.
+        Calculates the Q-values of state-action pairs.
 
         Parameters
         ----------
-        state : tensor
-            State or observation.
-        action : tensor
-            Action.
+        states : tensor
+            States or observations.
+        actions : tensor
+            Actions.
         seq_lengths : tensor
             Sequence lengths for data in batch.
 
         Returns
         -------
-        q_value : tensor
-            Q-value for given state-action pair.
+        q_values : tensor
+            Q-values for given state-action pairs.
         """
-        x = torch.cat([state, action], 2)
+        x = torch.cat([states, actions], 2)
         x = F.relu(self.fc1(x))
 
         x = pack_padded_sequence(x, seq_lengths, enforce_sorted=False)
@@ -192,8 +194,9 @@ class RecurrentContinuousCritic(nn.Module):
         x, x_unpacked_len = pad_packed_sequence(x)
 
         x = F.relu(self.fc2(x))
-        q_value = self.fc3(x)
-        return q_value
+        q_values = self.fc3(x)
+
+        return q_values
 
 
 class RecurrentContinuousActor(nn.Module):
@@ -229,27 +232,27 @@ class RecurrentContinuousActor(nn.Module):
             ),
         )
 
-    def forward(self, state, seq_lengths, in_hidden=None):
+    def forward(self, states, seq_lengths, in_hidden=None):
         """
-        Calculates the mean and standard deviation of the action distribution.
+        Calculates means and log stds of action distributions generated from input states.
 
         Parameters
         ----------
-        state : tensor
-            State or observation.
+        states : tensor
+            States or observations.
         seq_lengths : tensor
             Sequence lengths for data in batch.
 
         Returns
         -------
-        mean : tensor
-            Mean of action distribution.
-        log_std : tensor
-            Log of the standard deviation of the action distribution.
+        means : tensor
+            Means of action distributions.
+        log_stds : tensor
+            Log stds of action distributions.
         out_hidden : tensor
             Hidden layers of LSTM for preserving memory across steps.
         """
-        x = F.relu(self.fc1(state))
+        x = F.relu(self.fc1(states))
 
         x = pack_padded_sequence(x, seq_lengths, enforce_sorted=False)
         self.lstm1.flatten_parameters()
@@ -257,23 +260,23 @@ class RecurrentContinuousActor(nn.Module):
         x, x_unpacked_len = pad_packed_sequence(x)
 
         x = F.relu(self.fc2(x))
-        mean = self.fc_mean(x)
-        log_std = self.fc_logstd(x)
-        log_std = torch.tanh(log_std)
-        log_std = LOG_STD_MIN + 0.5 * (LOG_STD_MAX - LOG_STD_MIN) * (
-            log_std + 1
+        means = self.fc_mean(x)
+        log_stds = self.fc_logstd(x)
+        log_stds = torch.tanh(log_stds)
+        log_stds = LOG_STD_MIN + 0.5 * (LOG_STD_MAX - LOG_STD_MIN) * (
+            log_stds + 1
         )  # From SpinUp / Denis Yarats
 
-        return mean, log_std, out_hidden
+        return means, log_stds, out_hidden
 
-    def get_action(self, state, seq_lengths, in_hidden=None):
+    def get_actions(self, states, seq_lengths, in_hidden=None):
         """
         Calculates actions by sampling from action distribution.
 
         Parameters
         ----------
-        state : tensor
-            State or observation.
+        states : tensor
+            States or observations.
         seq_lengths : tensor
             Sequence lengths for data in batch.
         in_hidden : tensor
@@ -282,27 +285,28 @@ class RecurrentContinuousActor(nn.Module):
 
         Returns
         -------
-        action : tensor
-            Sampled action from action distribution.
-        log_prob : tensor
-            Log of action probabilities, used for entropy.
-        mean : tensor
-            Mean of action distribution.
+        actions : tensor
+            Sampled actions from action distributions.
+        log_probs : tensor
+            Logs of action probabilities, used for entropy.
+        means : tensor
+            Means of action distributions.
         out_hidden : tensor
             Hidden layers of LSTM for preserving memory across steps.
         """
-        mean, log_std, out_hidden = self(state, seq_lengths, in_hidden)
-        std = log_std.exp()
-        normal = torch.distributions.Normal(mean, std)
+        means, log_stds, out_hidden = self(states, seq_lengths, in_hidden)
+        stds = log_stds.exp()
+        normal = torch.distributions.Normal(means, stds)
         x_t = normal.rsample()  # for reparameterization trick (mean + std * N(0,1))
         y_t = torch.tanh(x_t)
-        action = y_t * self.action_scale + self.action_bias
-        log_prob = normal.log_prob(x_t)
+        actions = y_t * self.action_scale + self.action_bias
+        log_probs = normal.log_prob(x_t)
         # Enforcing Action Bound
-        log_prob -= torch.log(self.action_scale * (1 - y_t.pow(2)) + 1e-6)
-        log_prob = log_prob.sum(2, keepdim=True)
-        mean = torch.tanh(mean) * self.action_scale + self.action_bias
-        return action, log_prob, mean, out_hidden
+        log_probs -= torch.log(self.action_scale * (1 - y_t.pow(2)) + 1e-6)
+        log_probs = log_probs.sum(2, keepdim=True)
+        means = torch.tanh(means) * self.action_scale + self.action_bias
+
+        return actions, log_probs, means, out_hidden
 
 
 class RecurrentDiscreteCritic(nn.Module):
@@ -323,14 +327,14 @@ class RecurrentDiscreteCritic(nn.Module):
         self.fc2 = nn.Linear(256, 256)
         self.fc3 = nn.Linear(256, env.action_space.n)
 
-    def forward(self, state, seq_lengths):
+    def forward(self, states, seq_lengths):
         """
         Calculates Q-values for each state-action.
 
         Parameters
         ----------
-        state : tensor
-            State or observation.
+        states : tensor
+            States or observations.
         seq_lengths : tensor
              Sequence lengths for data in batch.
 
@@ -340,7 +344,7 @@ class RecurrentDiscreteCritic(nn.Module):
             Q-values for all actions possible with input state.
         """
         # Embedding layer
-        x = F.relu(self.fc1(state))
+        x = F.relu(self.fc1(states))
 
         # Padded LSTM layer
         x = pack_padded_sequence(x, seq_lengths, enforce_sorted=False)
@@ -351,6 +355,7 @@ class RecurrentDiscreteCritic(nn.Module):
         # Remaining layers
         x = F.relu(self.fc2(x))
         q_values = self.fc3(x)
+
         return q_values
 
 
@@ -373,14 +378,14 @@ class RecurrentDiscreteActor(nn.Module):
         self.fc_out = nn.Linear(256, env.action_space.n)
         self.softmax = nn.Softmax(dim=-1)
 
-    def forward(self, state, seq_lengths, in_hidden=None):
+    def forward(self, states, seq_lengths, in_hidden=None):
         """
         Calculates probabilities for taking each action given a state.
 
         Parameters
         ----------
-        state : tensor
-            State or observation.
+        states : tensor
+            States or observations.
         seq_lengths : tensor
              Sequence lengths for data in batch.
         in_hidden : float
@@ -394,7 +399,7 @@ class RecurrentDiscreteActor(nn.Module):
             LSTM hidden layer for preserving memory for next timestep.
         """
         # Embedding layer
-        x = F.relu(self.fc1(state))
+        x = F.relu(self.fc1(states))
 
         # Padded LSTM layer
         x = pack_padded_sequence(x, seq_lengths, enforce_sorted=False)
@@ -409,14 +414,14 @@ class RecurrentDiscreteActor(nn.Module):
 
         return action_probs, out_hidden
 
-    def get_action(self, state, seq_lengths, in_hidden=None, epsilon=1e-6):
+    def get_actions(self, states, seq_lengths, in_hidden=None, epsilon=1e-6):
         """
         Calculates actions by sampling from action distribution.
 
         Parameters
         ----------
-        state : tensor
-            State or observation.
+        states : tensor
+            States or observations.
         seq_lengths : tensor
              Sequence lengths for data in batch.
         in_hidden : float
@@ -426,25 +431,26 @@ class RecurrentDiscreteActor(nn.Module):
 
         Returns
         -------
-        action : tensor
-            Sampled action from action distribution.
+        actions : tensor
+            Sampled actions from action distributions.
         action_probs : tensor
             Probabilities for all actions possible with input state.
         log_action_probs : tensor
-            Log of action probabilities, used for entropy.
+            Logs of action probabilities, used for entropy.
         out_hidden : tensor
             LSTM hidden layer for preserving memory for next timestep.
         """
-        action_probs, out_hidden = self.forward(state, seq_lengths, in_hidden)
+        action_probs, out_hidden = self.forward(states, seq_lengths, in_hidden)
 
         dist = Categorical(action_probs)
-        action = dist.sample().to(state.device)
+        actions = dist.sample().to(states.device)
 
         # Have to deal with situation of 0.0 probabilities because we can't do log 0
         z = action_probs == 0.0
         z = z.float() * 1e-8
         log_action_probs = torch.log(action_probs + z)
-        return action, action_probs, log_action_probs, out_hidden
+
+        return actions, action_probs, log_action_probs, out_hidden
 
 
 class DiscreteCritic(nn.Module):
@@ -464,23 +470,24 @@ class DiscreteCritic(nn.Module):
         self.fc2 = nn.Linear(256, 256)
         self.fc3 = nn.Linear(256, env.action_space.n)
 
-    def forward(self, state):
+    def forward(self, states):
         """
         Calculates Q-values for each state-action.
 
         Parameters
         ----------
-        state : tensor
-            State or observation.
+        states : tensor
+            States or observations.
 
         Returns
         -------
         q_values : tensor
             Q-values for all actions possible with input state.
         """
-        x = F.relu(self.fc1(state))
+        x = F.relu(self.fc1(states))
         x = F.relu(self.fc2(x))
         q_values = self.fc3(x)
+
         return q_values
 
 
@@ -502,57 +509,58 @@ class DiscreteActor(nn.Module):
         self.fc_out = nn.Linear(256, env.action_space.n)
         self.softmax = nn.Softmax(dim=-1)
 
-    def forward(self, state):
+    def forward(self, states):
         """
         Calculates probabilities for taking each action given a state.
 
         Parameters
         ----------
-        state : tensor
-            State or observation.
+        states : tensor
+            States or observations.
 
         Returns
         -------
         action_probs : tensor
             Probabilities for all actions possible with input state.
         """
-        x = F.relu(self.fc1(state))
+        x = F.relu(self.fc1(states))
         x = F.relu(self.fc2(x))
         action_logits = self.fc_out(x)
         action_probs = self.softmax(action_logits)
 
         return action_probs
 
-    def get_action(self, state, epsilon=1e-6):
+    def get_actions(self, states, epsilon=1e-6):
         """
         Calculates actions by sampling from action distribution.
 
         Parameters
         ----------
-        state : tensor
-            State or observation.
+        states : tensor
+            States or observations.
         epsilon : float
             Used to ensure no zero probability values.
 
         Returns
         -------
-        action : tensor
-            Sampled action from action distribution.
+        actions : tensor
+            Sampled actions from action distributions.
         action_probs : tensor
             Probabilities for all actions possible with input state.
         log_action_probs : tensor
-            Log of action probabilities, used for entropy.
+            Logs of action probabilities, used for entropy.
         """
-        action_probs = self.forward(state)
+        action_probs = self.forward(states)
 
         dist = Categorical(action_probs)
-        action = dist.sample().to(state.device)
+        actions = dist.sample().to(states.device)
 
         # Have to deal with situation of 0.0 probabilities because we can't do log 0
         z = action_probs == 0.0
         z = z.float() * 1e-8
         log_action_probs = torch.log(action_probs + z)
-        return action, action_probs, log_action_probs
+
+        return actions, action_probs, log_action_probs
 
 
 class RecurrentDiscreteCriticDiscreteObs(nn.Module):
@@ -573,14 +581,14 @@ class RecurrentDiscreteCriticDiscreteObs(nn.Module):
         self.fc2 = nn.Linear(256, 256)
         self.fc3 = nn.Linear(256, env.action_space.n)
 
-    def forward(self, state, seq_lengths):
+    def forward(self, states, seq_lengths):
         """
         Calculates Q-values for each state-action.
 
         Parameters
         ----------
-        state : tensor
-            State or observation.
+        states : tensor
+            States or observations.
         seq_lengths : tensor
              Sequence lengths for data in batch.
 
@@ -590,7 +598,7 @@ class RecurrentDiscreteCriticDiscreteObs(nn.Module):
             Q-values for all actions possible with input state.
         """
         # Embedding layer
-        x = self.embedding(state)
+        x = self.embedding(states)
 
         # Padded LSTM layer
         x = pack_padded_sequence(x, seq_lengths, enforce_sorted=False)
@@ -601,6 +609,7 @@ class RecurrentDiscreteCriticDiscreteObs(nn.Module):
         # Remaining layers
         x = F.relu(self.fc2(x))
         q_values = self.fc3(x)
+
         return q_values
 
 
@@ -623,14 +632,14 @@ class RecurrentDiscreteActorDiscreteObs(nn.Module):
         self.fc_out = nn.Linear(256, env.action_space.n)
         self.softmax = nn.Softmax(dim=-1)
 
-    def forward(self, state, seq_lengths, in_hidden=None):
+    def forward(self, states, seq_lengths, in_hidden=None):
         """
         Calculates probabilities for taking each action given a state.
 
         Parameters
         ----------
-        state : tensor
-            State or observation.
+        states : tensor
+            States or observations.
         seq_lengths : tensor
              Sequence lengths for data in batch.
         in_hidden : float
@@ -644,7 +653,7 @@ class RecurrentDiscreteActorDiscreteObs(nn.Module):
             LSTM hidden layer for preserving memory for next timestep.
         """
         # Embedding layer
-        x = self.embedding(state)
+        x = self.embedding(states)
 
         # Padded LSTM layer
         x = pack_padded_sequence(x, seq_lengths, enforce_sorted=False)
@@ -659,14 +668,14 @@ class RecurrentDiscreteActorDiscreteObs(nn.Module):
 
         return action_probs, out_hidden
 
-    def get_action(self, state, seq_lengths, in_hidden=None, epsilon=1e-6):
+    def get_actions(self, states, seq_lengths, in_hidden=None, epsilon=1e-6):
         """
         Calculates actions by sampling from action distribution.
 
         Parameters
         ----------
-        state : tensor
-            State or observation.
+        states : tensor
+            States or observations.
         seq_lengths : tensor
              Sequence lengths for data in batch.
         in_hidden : float
@@ -676,25 +685,26 @@ class RecurrentDiscreteActorDiscreteObs(nn.Module):
 
         Returns
         -------
-        action : tensor
-            Sampled action from action distribution.
+        actions : tensor
+            Sampled actions from action distributions.
         action_probs : tensor
             Probabilities for all actions possible with input state.
         log_action_probs : tensor
-            Log of action probabilities, used for entropy.
+            Logs of action probabilities, used for entropy.
         out_hidden : tensor
             LSTM hidden layer for preserving memory for next timestep.
         """
-        action_probs, out_hidden = self.forward(state, seq_lengths, in_hidden)
+        action_probs, out_hidden = self.forward(states, seq_lengths, in_hidden)
 
         dist = Categorical(action_probs)
-        action = dist.sample().to(state.device)
+        actions = dist.sample().to(states.device)
 
         # Have to deal with situation of 0.0 probabilities because we can't do log 0
         z = action_probs == 0.0
         z = z.float() * 1e-8
         log_action_probs = torch.log(action_probs + z)
-        return action, action_probs, log_action_probs, out_hidden
+
+        return actions, action_probs, log_action_probs, out_hidden
 
 
 class DiscreteCriticDiscreteObs(nn.Module):
@@ -714,23 +724,24 @@ class DiscreteCriticDiscreteObs(nn.Module):
         self.fc2 = nn.Linear(256, 256)
         self.fc3 = nn.Linear(256, env.action_space.n)
 
-    def forward(self, state):
+    def forward(self, states):
         """
         Calculates Q-values for each state-action.
 
         Parameters
         ----------
-        state : tensor
-            State or observation.
+        states : tensor
+            States or observations.
 
         Returns
         -------
         q_values : tensor
             Q-values for all actions possible with input state.
         """
-        x = self.embedding(state)
+        x = self.embedding(states)
         x = F.relu(self.fc2(x))
         q_values = self.fc3(x)
+
         return q_values
 
 
@@ -752,54 +763,55 @@ class DiscreteActorDiscreteObs(nn.Module):
         self.fc_out = nn.Linear(256, env.action_space.n)
         self.softmax = nn.Softmax(dim=-1)
 
-    def forward(self, state):
+    def forward(self, states):
         """
         Calculates probabilities for taking each action given a state.
 
         Parameters
         ----------
-        state : tensor
-            State or observation.
+        states : tensor
+            States or observations.
 
         Returns
         -------
         action_probs : tensor
             Probabilities for all actions possible with input state.
         """
-        x = self.embedding(state)
+        x = self.embedding(states)
         x = F.relu(self.fc2(x))
         action_logits = self.fc_out(x)
         action_probs = self.softmax(action_logits)
 
         return action_probs
 
-    def get_action(self, state, epsilon=1e-6):
+    def get_actions(self, states, epsilon=1e-6):
         """
         Calculates actions by sampling from action distribution.
 
         Parameters
         ----------
-        state : tensor
-            State or observation.
+        states : tensor
+            States or observations.
         epsilon : float
             Used to ensure no zero probability values.
 
         Returns
         -------
-        action : tensor
-            Sampled action from action distribution.
+        actions : tensor
+            Sampled actions from action distributions.
         action_probs : tensor
             Probabilities for all actions possible with input state.
         log_action_probs : tensor
-            Log of action probabilities, used for entropy.
+            Logs of action probabilities, used for entropy.
         """
-        action_probs = self.forward(state)
+        action_probs = self.forward(states)
 
         dist = Categorical(action_probs)
-        action = dist.sample().to(state.device)
+        actions = dist.sample().to(states.device)
 
         # Have to deal with situation of 0.0 probabilities because we can't do log 0
         z = action_probs == 0.0
         z = z.float() * 1e-8
         log_action_probs = torch.log(action_probs + z)
-        return action, action_probs, log_action_probs
+
+        return actions, action_probs, log_action_probs

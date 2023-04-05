@@ -225,7 +225,7 @@ if __name__ == "__main__":
         if global_step < args.learning_starts:
             action = env.action_space.sample()
         else:
-            action, _, _ = actor.get_action(
+            action, _, _ = actor.get_actions(
                 torch.tensor(obs, dtype=torch.float32).to(device)
             )
             action = action.detach().cpu().numpy()
@@ -263,7 +263,7 @@ if __name__ == "__main__":
             # no grad because target networks are updated separately (pg. 6 of
             # updated SAC paper)
             with torch.no_grad():
-                next_state_actions, next_state_log_pi, _ = actor.get_action(
+                next_state_actions, next_state_log_pi, _ = actor.get_actions(
                     next_observations
                 )
                 # two Q-value estimates for reducing overestimation bias (pg. 8 of updated SAC paper)
@@ -299,7 +299,7 @@ if __name__ == "__main__":
                 for _ in range(
                     args.policy_frequency
                 ):  # compensate for the delay by doing 'actor_update_interval' instead of 1
-                    pi, log_pi, _ = actor.get_action(observations)
+                    pi, log_pi, _ = actor.get_actions(observations)
 
                     # no grad because q-networks are updated separately
                     with torch.no_grad():
@@ -318,7 +318,7 @@ if __name__ == "__main__":
                     if args.autotune:
                         # no grad because actor network is updated separately
                         with torch.no_grad():
-                            _, log_pi, _ = actor.get_action(observations)
+                            _, log_pi, _ = actor.get_actions(observations)
                         # calculate eq. 18 in updated SAC paper
                         alpha_loss = (-log_alpha * (log_pi + target_entropy)).mean()
 
