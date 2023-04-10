@@ -286,13 +286,16 @@ class EpisodicReplayBuffer:
 
             self.timesteps_in_buffer -= len(removed_obs)
 
-    def sample(self, batch_size):
+    def sample(self, batch_size=256, history_length=None):
         """Sample batch of episodes from episodic replay buffer.
 
         Parameters
         ----------
         batch_size : int
             Size of batch to sample from buffer.
+        history_length : int
+            Sequence length to sample, if None then
+            full episode will be sampled.
 
         Returns
         -------
@@ -309,30 +312,93 @@ class EpisodicReplayBuffer:
         seq_lengths : tensor
             Sequence lengths to keep track of padding.
         """
-        # Generate indices for random episodes
-        upper_bound = len(self.obs)
-        batch_inds = np.random.randint(0, upper_bound, size=batch_size)
+        if history_length:
+            # Generate indices for random episodes
+            upper_bound = len(self.obs)
+            batch_inds = np.random.randint(0, upper_bound, size=batch_size)
 
-        # Deques for storing batch to return
-        batch_obs = deque()
-        batch_actions = deque()
-        batch_next_obs = deque()
-        batch_rewards = deque()
-        batch_terminateds = deque()
+            # Deques for storing batch to return
+            batch_obs = deque()
+            batch_actions = deque()
+            batch_next_obs = deque()
+            batch_rewards = deque()
+            batch_terminateds = deque()
 
-        # Generate batch
-        for i in range(batch_size):
-            batch_obs.append(torch.as_tensor(np.array(self.obs[batch_inds[i]])))
-            batch_actions.append(torch.as_tensor(np.array(self.actions[batch_inds[i]])))
-            batch_next_obs.append(
-                torch.as_tensor(np.array(self.next_obs[batch_inds[i]]))
-            )
-            batch_rewards.append(
-                torch.as_tensor(np.array(self.rewards[batch_inds[i]], dtype=np.float32))
-            )
-            batch_terminateds.append(
-                torch.as_tensor(np.array(self.terminateds[batch_inds[i]]))
-            )
+            # Generate batch
+            for i in range(batch_size):
+                # Generate random index in episode for sampling history
+                # sequence
+                episode_length = len(self.obs[batch_inds[i]])
+                episode_ind_start = np.random.randint(0, episode_length)
+                episode_ind_end = min(
+                    episode_ind_start + history_length, episode_length
+                )
+
+                batch_obs.append(
+                    torch.as_tensor(
+                        np.array(self.obs[batch_inds[i]])[
+                            episode_ind_start:episode_ind_end
+                        ]
+                    )
+                )
+                batch_actions.append(
+                    torch.as_tensor(
+                        np.array(self.actions[batch_inds[i]])[
+                            episode_ind_start:episode_ind_end
+                        ]
+                    )
+                )
+                batch_next_obs.append(
+                    torch.as_tensor(
+                        np.array(self.next_obs[batch_inds[i]])[
+                            episode_ind_start:episode_ind_end
+                        ]
+                    )
+                )
+                batch_rewards.append(
+                    torch.as_tensor(
+                        np.array(self.rewards[batch_inds[i]], dtype=np.float32)[
+                            episode_ind_start:episode_ind_end
+                        ]
+                    )
+                )
+                batch_terminateds.append(
+                    torch.as_tensor(
+                        np.array(self.terminateds[batch_inds[i]])[
+                            episode_ind_start:episode_ind_end
+                        ]
+                    )
+                )
+
+        else:
+            # Generate indices for random episodes
+            upper_bound = len(self.obs)
+            batch_inds = np.random.randint(0, upper_bound, size=batch_size)
+
+            # Deques for storing batch to return
+            batch_obs = deque()
+            batch_actions = deque()
+            batch_next_obs = deque()
+            batch_rewards = deque()
+            batch_terminateds = deque()
+
+            # Generate batch
+            for i in range(batch_size):
+                batch_obs.append(torch.as_tensor(np.array(self.obs[batch_inds[i]])))
+                batch_actions.append(
+                    torch.as_tensor(np.array(self.actions[batch_inds[i]]))
+                )
+                batch_next_obs.append(
+                    torch.as_tensor(np.array(self.next_obs[batch_inds[i]]))
+                )
+                batch_rewards.append(
+                    torch.as_tensor(
+                        np.array(self.rewards[batch_inds[i]], dtype=np.float32)
+                    )
+                )
+                batch_terminateds.append(
+                    torch.as_tensor(np.array(self.terminateds[batch_inds[i]]))
+                )
 
         # Create padded arrays of history
         seq_lengths = torch.LongTensor(list(map(len, batch_obs)))
