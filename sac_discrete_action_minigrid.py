@@ -9,10 +9,11 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 import torch.optim as optim
+from torchvision.transforms import ToTensor
 
 import wandb
-from common.models import DiscreteActor, DiscreteCritic
-from common.replay_buffer import ReplayBuffer
+from common.models import DiscreteActorMiniGridObs, DiscreteCriticMiniGridObs
+from common.replay_buffer import MiniGridReplayBuffer as ReplayBuffer
 from common.utils import make_env, save, set_seed
 
 
@@ -25,7 +26,7 @@ def parse_args():
         help="seed of the experiment")
     parser.add_argument("--cuda", type=lambda x: bool(strtobool(x)), default=True, nargs="?", const=True,
         help="if toggled, cuda will be enabled by default")
-    parser.add_argument("--wandb-project", type=str, default="sac-discrete-action",
+    parser.add_argument("--wandb-project", type=str, default="sac-discrete-action-minigrid",
         help="wandb project name")
     parser.add_argument("--wandb-group", type=str, default=None,
         help="wandb group name to use for run")
@@ -35,7 +36,7 @@ def parse_args():
         help="whether to capture videos of the agent performances (check out `videos` folder)")
 
     # Algorithm specific arguments
-    parser.add_argument("--env-id", type=str, default="CartPole-v0",
+    parser.add_argument("--env-id", type=str, default="MiniGrid-FourRooms-v0",
         help="the id of the environment")
     parser.add_argument("--total-timesteps", type=int, default=200500,
         help="total timesteps of the experiments")
@@ -108,7 +109,7 @@ if __name__ == "__main__":
             save_code=True,
             settings=wandb.Settings(code_dir="."),
             group=args.wandb_group,
-            mode="offline",
+            mode="online",
         )
 
     # Set training device
@@ -141,11 +142,11 @@ if __name__ == "__main__":
     ), "only discrete action space is supported"
 
     # Initialize models and optimizers
-    actor = DiscreteActor(env).to(device)
-    qf1 = DiscreteCritic(env).to(device)
-    qf2 = DiscreteCritic(env).to(device)
-    qf1_target = DiscreteCritic(env).to(device)
-    qf2_target = DiscreteCritic(env).to(device)
+    actor = DiscreteActorMiniGridObs(env).to(device)
+    qf1 = DiscreteCriticMiniGridObs(env).to(device)
+    qf2 = DiscreteCriticMiniGridObs(env).to(device)
+    qf1_target = DiscreteCriticMiniGridObs(env).to(device)
+    qf2_target = DiscreteCriticMiniGridObs(env).to(device)
     qf1_target.load_state_dict(qf1.state_dict())
     qf2_target.load_state_dict(qf2.state_dict())
     q_optimizer = optim.Adam(
@@ -171,7 +172,7 @@ if __name__ == "__main__":
 
     # Automatic entropy tuning
     if args.autotune:
-        target_entropy = -0.3 * torch.log(1 / torch.tensor(env.action_space.n))
+        target_entropy = -0.9 * torch.log(1 / torch.tensor(env.action_space.n))
         if args.resume:
             log_alpha = checkpoint["model_state_dict"]["log_alpha"]
         else:
@@ -191,8 +192,6 @@ if __name__ == "__main__":
     env.observation_space.dtype = np.float32
     rb = ReplayBuffer(
         args.buffer_size,
-        env.observation_space,
-        env.action_space,
         device,
     )
     # If resuming training, then load previous replay buffer
@@ -227,8 +226,12 @@ if __name__ == "__main__":
         if global_step < args.learning_starts:
             action = env.action_space.sample()
         else:
-            action, _, _ = actor.get_actions(torch.tensor(obs).to(device))
-            action = action.detach().cpu().numpy()
+            temp_obs = {
+                "image": ToTensor()(obs["image"]).to(device).unsqueeze(0),
+                "direction": torch.tensor(obs["direction"]).to(device).unsqueeze(0)
+            }
+            action, _, _ = actor.get_actions(temp_obs)
+            action = action.detach().cpu().numpy()[0]
 
         # Take step in environment
         next_obs, reward, terminated, truncated, info = env.step(action)

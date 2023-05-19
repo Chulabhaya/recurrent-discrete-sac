@@ -815,3 +815,154 @@ class DiscreteActorDiscreteObs(nn.Module):
         log_action_probs = torch.log(action_probs + z)
 
         return actions, action_probs, log_action_probs
+
+class DiscreteCriticMiniGridObs(nn.Module):
+    """Discrete soft Q-network model for discrete SAC with discrete actions
+    and MiniGrid observations."""
+
+    def __init__(self, env):
+        """Initialize the critic model.
+
+        Parameters
+        ----------
+        env : gym environment
+            Gym environment being used for learning.
+        """
+        super().__init__()
+        # Image processing head
+        self.conv1 = nn.Conv2d(in_channels=env.observation_space["image"].shape[2], out_channels=16, kernel_size=(3, 3))
+        self.conv2 = nn.Conv2d(in_channels=16, out_channels=32, kernel_size=(3, 3))
+        self.conv3 = nn.Conv2d(in_channels=32, out_channels=64, kernel_size=(3, 3))
+        self.maxpool1 = nn.MaxPool2d((2, 2), stride=2)
+        self.flatten1 = nn.Flatten()
+
+        # Direction processing head
+        self.embedding = nn.Embedding(env.observation_space["direction"].n, 128)
+
+        # Remainder of network
+        self.fc1 = nn.Linear(1152, 256)
+        self.fc_out = nn.Linear(256, env.action_space.n)
+
+    def forward(self, states):
+        """
+        Calculates Q-values for each state-action.
+
+        Parameters
+        ----------
+        states : tensor
+            States or observations.
+
+        Returns
+        -------
+        q_values : tensor
+            Q-values for all actions possible with input state.
+        """
+        # Image processing head
+        x = F.relu(self.conv1(states["image"]))
+        x = self.maxpool1(x)
+        x = F.relu(self.conv2(x))
+        x = F.relu(self.conv3(x))
+        x = self.flatten1(x)
+
+        # Direction processing head
+        y = self.embedding(states["direction"])
+
+        # Rest of the network
+        x = torch.cat([x, y], dim=1)
+        x = F.relu(self.fc1(x))
+        q_values = self.fc_out(x)
+
+        return q_values
+
+
+class DiscreteActorMiniGridObs(nn.Module):
+    """Discrete actor model for discrete SAC with discrete actions
+    and MiniGrid observations."""
+
+    def __init__(self, env):
+        """Initialize the actor model.
+
+        Parameters
+        ----------
+        env : gym environment
+            Gym environment being used for learning.
+        """
+        super().__init__()
+        # Image processing head
+        self.conv1 = nn.Conv2d(in_channels=env.observation_space["image"].shape[2], out_channels=16, kernel_size=(3, 3))
+        self.conv2 = nn.Conv2d(in_channels=16, out_channels=32, kernel_size=(3, 3))
+        self.conv3 = nn.Conv2d(in_channels=32, out_channels=64, kernel_size=(3, 3))
+        self.maxpool1 = nn.MaxPool2d((2, 2), stride=2)
+        self.flatten1 = nn.Flatten()
+
+        # Direction processing head
+        self.embedding = nn.Embedding(env.observation_space["direction"].n, 128)
+
+        # Remainder of network
+        self.fc1 = nn.Linear(1152, 256)
+        self.fc_out = nn.Linear(256, env.action_space.n)
+        self.softmax = nn.Softmax(dim=-1)
+
+    def forward(self, states):
+        """
+        Calculates probabilities for taking each action given a state.
+
+        Parameters
+        ----------
+        states : tensor
+            States or observations.
+
+        Returns
+        -------
+        action_probs : tensor
+            Probabilities for all actions possible with input state.
+        """
+        # Image processing head
+        x = F.relu(self.conv1(states["image"]))
+        x = self.maxpool1(x)
+        x = F.relu(self.conv2(x))
+        x = F.relu(self.conv3(x))
+        x = self.flatten1(x)
+
+        # Direction processing head
+        y = self.embedding(states["direction"])
+
+        # Rest of the network
+        x = torch.cat([x, y], dim=1)
+        x = F.relu(self.fc1(x))
+        action_logits = self.fc_out(x)
+        action_probs = self.softmax(action_logits)
+
+        return action_probs
+
+    def get_actions(self, states, epsilon=1e-6):
+        """
+        Calculates actions by sampling from action distribution.
+
+        Parameters
+        ----------
+        states : tensor
+            States or observations.
+        epsilon : float
+            Used to ensure no zero probability values.
+
+        Returns
+        -------
+        actions : tensor
+            Sampled actions from action distributions.
+        action_probs : tensor
+            Probabilities for all actions possible with input state.
+        log_action_probs : tensor
+            Logs of action probabilities, used for entropy.
+        """
+        action_probs = self.forward(states)
+
+        dist = Categorical(action_probs)
+        actions = dist.sample().to(states["image"].device)
+
+        # Have to deal with situation of 0.0 probabilities because we can't do log 0
+        z = action_probs == 0.0
+        z = z.float() * 1e-8
+        log_action_probs = torch.log(action_probs + z)
+
+        return actions, action_probs, log_action_probs

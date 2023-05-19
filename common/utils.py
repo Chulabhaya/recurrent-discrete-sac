@@ -8,6 +8,9 @@ import torch
 import gymnasium_pomdps
 import simple_pomdps
 
+from gymnasium_pomdps.wrappers.mdp import MDP
+from minigrid.wrappers import FullyObsWrapper
+
 
 def make_env(env_id, seed, capture_video, run_name, max_episode_len=None):
     """Generates seeded environment.
