@@ -36,7 +36,7 @@ def parse_args():
         help="whether to capture videos of the agent performances (check out `videos` folder)")
 
     # Algorithm specific arguments
-    parser.add_argument("--env-id", type=str, default="MiniGrid-FourRooms-v0",
+    parser.add_argument("--env-id", type=str, default="MiniGrid-SimpleEmpty-5x5-v0",
         help="the id of the environment")
     parser.add_argument("--total-timesteps", type=int, default=200500,
         help="total timesteps of the experiments")
@@ -172,7 +172,7 @@ if __name__ == "__main__":
 
     # Automatic entropy tuning
     if args.autotune:
-        target_entropy = -0.9 * torch.log(1 / torch.tensor(env.action_space.n))
+        target_entropy = -0.3 * torch.log(1 / torch.tensor(env.action_space.n))
         if args.resume:
             log_alpha = checkpoint["model_state_dict"]["log_alpha"]
         else:

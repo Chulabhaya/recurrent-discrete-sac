@@ -7,6 +7,7 @@ import torch
 
 import gymnasium_pomdps
 import simple_pomdps
+import modified_minigrids
 
 from gymnasium_pomdps.wrappers.mdp import MDP
 from minigrid.wrappers import FullyObsWrapper
@@ -33,7 +34,7 @@ def make_env(env_id, seed, capture_video, run_name, max_episode_len=None):
     env : gym environment
         Gym environment to be used for learning.
     """
-    env = gym.make(env_id)
+    env = FullyObsWrapper(gym.make(env_id, max_steps=100))
     if max_episode_len is not None:
         env = gym.wrappers.TimeLimit(env, max_episode_steps=max_episode_len)
     if capture_video:

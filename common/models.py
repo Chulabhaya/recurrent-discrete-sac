@@ -830,17 +830,17 @@ class DiscreteCriticMiniGridObs(nn.Module):
         """
         super().__init__()
         # Image processing head
-        self.conv1 = nn.Conv2d(in_channels=env.observation_space["image"].shape[2], out_channels=16, kernel_size=(3, 3))
-        self.conv2 = nn.Conv2d(in_channels=16, out_channels=32, kernel_size=(3, 3))
-        self.conv3 = nn.Conv2d(in_channels=32, out_channels=64, kernel_size=(3, 3))
-        self.maxpool1 = nn.MaxPool2d((2, 2), stride=2)
+        self.conv1 = nn.Conv2d(in_channels=env.observation_space["image"].shape[2], out_channels=16, kernel_size=(2, 2))
+        self.conv2 = nn.Conv2d(in_channels=16, out_channels=32, kernel_size=(2, 2))
+        self.conv3 = nn.Conv2d(in_channels=32, out_channels=64, kernel_size=(2, 2))
+        # self.maxpool1 = nn.MaxPool2d((2, 2), stride=2)
         self.flatten1 = nn.Flatten()
 
         # Direction processing head
-        self.embedding = nn.Embedding(env.observation_space["direction"].n, 128)
+        # self.embedding = nn.Embedding(env.observation_space["direction"].n, 64)
 
         # Remainder of network
-        self.fc1 = nn.Linear(1152, 256)
+        self.fc1 = nn.Linear(256, 256)
         self.fc_out = nn.Linear(256, env.action_space.n)
 
     def forward(self, states):
@@ -859,16 +859,16 @@ class DiscreteCriticMiniGridObs(nn.Module):
         """
         # Image processing head
         x = F.relu(self.conv1(states["image"]))
-        x = self.maxpool1(x)
+        # x = self.maxpool1(x)
         x = F.relu(self.conv2(x))
         x = F.relu(self.conv3(x))
         x = self.flatten1(x)
 
         # Direction processing head
-        y = self.embedding(states["direction"])
+        # y = self.embedding(states["direction"])
 
         # Rest of the network
-        x = torch.cat([x, y], dim=1)
+        # x = torch.cat([x, y], dim=1)
         x = F.relu(self.fc1(x))
         q_values = self.fc_out(x)
 
@@ -889,17 +889,17 @@ class DiscreteActorMiniGridObs(nn.Module):
         """
         super().__init__()
         # Image processing head
-        self.conv1 = nn.Conv2d(in_channels=env.observation_space["image"].shape[2], out_channels=16, kernel_size=(3, 3))
-        self.conv2 = nn.Conv2d(in_channels=16, out_channels=32, kernel_size=(3, 3))
-        self.conv3 = nn.Conv2d(in_channels=32, out_channels=64, kernel_size=(3, 3))
-        self.maxpool1 = nn.MaxPool2d((2, 2), stride=2)
+        self.conv1 = nn.Conv2d(in_channels=env.observation_space["image"].shape[2], out_channels=16, kernel_size=(2, 2))
+        self.conv2 = nn.Conv2d(in_channels=16, out_channels=32, kernel_size=(2, 2))
+        self.conv3 = nn.Conv2d(in_channels=32, out_channels=64, kernel_size=(2, 2))
+        # self.maxpool1 = nn.MaxPool2d((2, 2), stride=2)
         self.flatten1 = nn.Flatten()
 
         # Direction processing head
-        self.embedding = nn.Embedding(env.observation_space["direction"].n, 128)
+        # self.embedding = nn.Embedding(env.observation_space["direction"].n, 64)
 
         # Remainder of network
-        self.fc1 = nn.Linear(1152, 256)
+        self.fc1 = nn.Linear(256, 256)
         self.fc_out = nn.Linear(256, env.action_space.n)
         self.softmax = nn.Softmax(dim=-1)
 
@@ -919,16 +919,16 @@ class DiscreteActorMiniGridObs(nn.Module):
         """
         # Image processing head
         x = F.relu(self.conv1(states["image"]))
-        x = self.maxpool1(x)
+        # x = self.maxpool1(x)
         x = F.relu(self.conv2(x))
         x = F.relu(self.conv3(x))
         x = self.flatten1(x)
 
         # Direction processing head
-        y = self.embedding(states["direction"])
+        # y = self.embedding(states["direction"])
 
         # Rest of the network
-        x = torch.cat([x, y], dim=1)
+        # x = torch.cat([x, y], dim=1)
         x = F.relu(self.fc1(x))
         action_logits = self.fc_out(x)
         action_probs = self.softmax(action_logits)
