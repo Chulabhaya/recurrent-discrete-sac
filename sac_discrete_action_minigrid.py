@@ -109,7 +109,7 @@ if __name__ == "__main__":
             save_code=True,
             settings=wandb.Settings(code_dir="."),
             group=args.wandb_group,
-            mode="online",
+            mode="offline",
         )
 
     # Set training device

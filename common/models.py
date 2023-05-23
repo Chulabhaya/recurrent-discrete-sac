@@ -816,6 +816,7 @@ class DiscreteActorDiscreteObs(nn.Module):
 
         return actions, action_probs, log_action_probs
 
+
 class DiscreteCriticMiniGridObs(nn.Module):
     """Discrete soft Q-network model for discrete SAC with discrete actions
     and MiniGrid observations."""
@@ -829,18 +830,17 @@ class DiscreteCriticMiniGridObs(nn.Module):
             Gym environment being used for learning.
         """
         super().__init__()
+        # Image shape
+        img_shape = env.observation_space["image"].shape
+
         # Image processing head
-        self.conv1 = nn.Conv2d(in_channels=env.observation_space["image"].shape[2], out_channels=16, kernel_size=(2, 2))
-        self.conv2 = nn.Conv2d(in_channels=16, out_channels=32, kernel_size=(2, 2))
-        self.conv3 = nn.Conv2d(in_channels=32, out_channels=64, kernel_size=(2, 2))
-        # self.maxpool1 = nn.MaxPool2d((2, 2), stride=2)
         self.flatten1 = nn.Flatten()
+        self.fc1 = nn.Linear(img_shape[0] * img_shape[1] * img_shape[2], 256)
 
         # Direction processing head
         # self.embedding = nn.Embedding(env.observation_space["direction"].n, 64)
 
         # Remainder of network
-        self.fc1 = nn.Linear(256, 256)
         self.fc_out = nn.Linear(256, env.action_space.n)
 
     def forward(self, states):
@@ -858,18 +858,14 @@ class DiscreteCriticMiniGridObs(nn.Module):
             Q-values for all actions possible with input state.
         """
         # Image processing head
-        x = F.relu(self.conv1(states["image"]))
-        # x = self.maxpool1(x)
-        x = F.relu(self.conv2(x))
-        x = F.relu(self.conv3(x))
-        x = self.flatten1(x)
+        x = self.flatten1(states["image"])
+        x = F.relu(self.fc1(x))
 
         # Direction processing head
         # y = self.embedding(states["direction"])
 
         # Rest of the network
         # x = torch.cat([x, y], dim=1)
-        x = F.relu(self.fc1(x))
         q_values = self.fc_out(x)
 
         return q_values
@@ -888,18 +884,17 @@ class DiscreteActorMiniGridObs(nn.Module):
             Gym environment being used for learning.
         """
         super().__init__()
+        # Image shape
+        img_shape = env.observation_space["image"].shape
+
         # Image processing head
-        self.conv1 = nn.Conv2d(in_channels=env.observation_space["image"].shape[2], out_channels=16, kernel_size=(2, 2))
-        self.conv2 = nn.Conv2d(in_channels=16, out_channels=32, kernel_size=(2, 2))
-        self.conv3 = nn.Conv2d(in_channels=32, out_channels=64, kernel_size=(2, 2))
-        # self.maxpool1 = nn.MaxPool2d((2, 2), stride=2)
         self.flatten1 = nn.Flatten()
+        self.fc1 = nn.Linear(img_shape[0] * img_shape[1] * img_shape[2], 256)
 
         # Direction processing head
         # self.embedding = nn.Embedding(env.observation_space["direction"].n, 64)
 
         # Remainder of network
-        self.fc1 = nn.Linear(256, 256)
         self.fc_out = nn.Linear(256, env.action_space.n)
         self.softmax = nn.Softmax(dim=-1)
 
@@ -918,18 +913,14 @@ class DiscreteActorMiniGridObs(nn.Module):
             Probabilities for all actions possible with input state.
         """
         # Image processing head
-        x = F.relu(self.conv1(states["image"]))
-        # x = self.maxpool1(x)
-        x = F.relu(self.conv2(x))
-        x = F.relu(self.conv3(x))
-        x = self.flatten1(x)
+        x = self.flatten1(states["image"])
+        x = F.relu(self.fc1(x))
 
         # Direction processing head
         # y = self.embedding(states["direction"])
 
         # Rest of the network
         # x = torch.cat([x, y], dim=1)
-        x = F.relu(self.fc1(x))
         action_logits = self.fc_out(x)
         action_probs = self.softmax(action_logits)
 
