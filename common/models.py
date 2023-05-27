@@ -834,14 +834,16 @@ class DiscreteCriticMiniGridObs(nn.Module):
         img_shape = env.observation_space["image"].shape
 
         # Image processing head
-        self.flatten1 = nn.Flatten()
-        self.fc1 = nn.Linear(img_shape[0] * img_shape[1] * img_shape[2], 256)
+        self.embedding1 = nn.Embedding(11, 4)
+        self.embedding2 = nn.Embedding(6, 4)
+        self.embedding3 = nn.Embedding(4, 4)
+        self.fc1 = nn.Linear(300, 256)
 
         # Direction processing head
         # self.embedding = nn.Embedding(env.observation_space["direction"].n, 64)
 
         # Remainder of network
-        self.fc_out = nn.Linear(256, env.action_space.n)
+        self.fc2 = nn.Linear(256, env.action_space.n)
 
     def forward(self, states):
         """
@@ -858,7 +860,14 @@ class DiscreteCriticMiniGridObs(nn.Module):
             Q-values for all actions possible with input state.
         """
         # Image processing head
-        x = self.flatten1(states["image"])
+        obj_idx = states["image"][:, :, :, 0]
+        color_idx = states["image"][:, :, :, 1]
+        state = states["image"][:, :, :, 2]
+        obj_emb = self.embedding1(obj_idx)
+        color_emb = self.embedding2(color_idx)
+        state_emb = self.embedding3(state)
+        x = torch.cat((obj_emb, color_emb, state_emb), dim=3)
+        x = torch.flatten(x, start_dim=1)
         x = F.relu(self.fc1(x))
 
         # Direction processing head
@@ -866,7 +875,7 @@ class DiscreteCriticMiniGridObs(nn.Module):
 
         # Rest of the network
         # x = torch.cat([x, y], dim=1)
-        q_values = self.fc_out(x)
+        q_values = self.fc2(x)
 
         return q_values
 
@@ -888,14 +897,16 @@ class DiscreteActorMiniGridObs(nn.Module):
         img_shape = env.observation_space["image"].shape
 
         # Image processing head
-        self.flatten1 = nn.Flatten()
-        self.fc1 = nn.Linear(img_shape[0] * img_shape[1] * img_shape[2], 256)
+        self.embedding1 = nn.Embedding(11, 4)
+        self.embedding2 = nn.Embedding(6, 4)
+        self.embedding3 = nn.Embedding(4, 4)
+        self.fc1 = nn.Linear(300, 256)
 
         # Direction processing head
         # self.embedding = nn.Embedding(env.observation_space["direction"].n, 64)
 
         # Remainder of network
-        self.fc_out = nn.Linear(256, env.action_space.n)
+        self.fc2 = nn.Linear(256, env.action_space.n)
         self.softmax = nn.Softmax(dim=-1)
 
     def forward(self, states):
@@ -913,7 +924,14 @@ class DiscreteActorMiniGridObs(nn.Module):
             Probabilities for all actions possible with input state.
         """
         # Image processing head
-        x = self.flatten1(states["image"])
+        obj_idx = states["image"][:, :, :, 0]
+        color_idx = states["image"][:, :, :, 1]
+        state = states["image"][:, :, :, 2]
+        obj_emb = self.embedding1(obj_idx)
+        color_emb = self.embedding2(color_idx)
+        state_emb = self.embedding3(state)
+        x = torch.cat((obj_emb, color_emb, state_emb), dim=3)
+        x = torch.flatten(x, start_dim=1)
         x = F.relu(self.fc1(x))
 
         # Direction processing head
@@ -921,7 +939,7 @@ class DiscreteActorMiniGridObs(nn.Module):
 
         # Rest of the network
         # x = torch.cat([x, y], dim=1)
-        action_logits = self.fc_out(x)
+        action_logits = self.fc2(x)
         action_probs = self.softmax(action_logits)
 
         return action_probs

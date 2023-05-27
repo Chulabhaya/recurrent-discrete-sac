@@ -613,13 +613,15 @@ class MiniGridReplayBuffer:
 
         # Generate batch
         for i in range(batch_size):
-            batch_image_obs.append(ToTensor()(self.obs[batch_inds[i]]["image"]))
+            batch_image_obs.append(
+                torch.as_tensor(np.array(self.obs[batch_inds[i]]["image"]))
+            )
             batch_direction_obs.append(
                 torch.as_tensor(np.array(self.obs[batch_inds[i]]["direction"]))
             )
             batch_actions.append(torch.as_tensor(np.array(self.actions[batch_inds[i]])))
             batch_image_next_obs.append(
-                ToTensor()(self.next_obs[batch_inds[i]]["image"])
+                torch.as_tensor(np.array(self.next_obs[batch_inds[i]]["image"]))
             )
             batch_direction_next_obs.append(
                 torch.as_tensor(np.array(self.next_obs[batch_inds[i]]["direction"]))
@@ -631,13 +633,15 @@ class MiniGridReplayBuffer:
                 torch.as_tensor(np.array(self.terminateds[batch_inds[i]]))
             )
 
-        batch_image_obs = torch.stack(tuple(batch_image_obs)).to(self.device)
+        batch_image_obs = torch.stack(tuple(batch_image_obs)).to(self.device).long()
         batch_direction_obs = torch.stack(tuple(batch_direction_obs)).to(self.device)
         batch_actions = torch.unsqueeze(
             torch.stack(tuple(batch_actions)).to(self.device), 1
         )
-        batch_image_next_obs = torch.stack(tuple(batch_image_next_obs)).to(self.device)
-        batch_direction_next_obs = torch.stack(tuple(batch_direction_next_obs)).to(self.device)
+        batch_image_next_obs = torch.stack(tuple(batch_image_next_obs)).to(self.device).long()
+        batch_direction_next_obs = torch.stack(tuple(batch_direction_next_obs)).to(
+            self.device
+        )
         batch_rewards = torch.unsqueeze(
             torch.stack(tuple(batch_rewards)).to(self.device), 1
         )
