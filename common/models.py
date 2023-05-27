@@ -894,7 +894,7 @@ class DiscreteActorMiniGridObs(nn.Module):
         self.fc2 = nn.Linear(1024, 256)
 
         # Remainder of network
-        self.fc2 = nn.Linear(256, env.action_space.n)
+        self.fc3 = nn.Linear(256, env.action_space.n)
         self.softmax = nn.Softmax(dim=-1)
 
     def forward(self, states):
