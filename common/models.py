@@ -1,10 +1,9 @@
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import numpy as np
-from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
 from torch.distributions import Categorical
-
+from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
 
 LOG_STD_MAX = 2
 LOG_STD_MIN = -5
@@ -830,17 +829,12 @@ class DiscreteCriticMiniGridObs(nn.Module):
             Gym environment being used for learning.
         """
         super().__init__()
-        # Image shape
-        img_shape = env.observation_space["image"].shape
 
         # Image processing head
         self.embedding1 = nn.Embedding(11, 4)
         self.embedding2 = nn.Embedding(6, 4)
         self.embedding3 = nn.Embedding(4, 4)
-        self.fc1 = nn.Linear(300, 256)
-
-        # Direction processing head
-        # self.embedding = nn.Embedding(env.observation_space["direction"].n, 64)
+        self.fc1 = nn.Linear(3072, 256)
 
         # Remainder of network
         self.fc2 = nn.Linear(256, env.action_space.n)
@@ -870,11 +864,7 @@ class DiscreteCriticMiniGridObs(nn.Module):
         x = torch.flatten(x, start_dim=1)
         x = F.relu(self.fc1(x))
 
-        # Direction processing head
-        # y = self.embedding(states["direction"])
-
         # Rest of the network
-        # x = torch.cat([x, y], dim=1)
         q_values = self.fc2(x)
 
         return q_values
@@ -893,17 +883,12 @@ class DiscreteActorMiniGridObs(nn.Module):
             Gym environment being used for learning.
         """
         super().__init__()
-        # Image shape
-        img_shape = env.observation_space["image"].shape
 
         # Image processing head
         self.embedding1 = nn.Embedding(11, 4)
         self.embedding2 = nn.Embedding(6, 4)
         self.embedding3 = nn.Embedding(4, 4)
-        self.fc1 = nn.Linear(300, 256)
-
-        # Direction processing head
-        # self.embedding = nn.Embedding(env.observation_space["direction"].n, 64)
+        self.fc1 = nn.Linear(3072, 256)
 
         # Remainder of network
         self.fc2 = nn.Linear(256, env.action_space.n)
@@ -934,11 +919,7 @@ class DiscreteActorMiniGridObs(nn.Module):
         x = torch.flatten(x, start_dim=1)
         x = F.relu(self.fc1(x))
 
-        # Direction processing head
-        # y = self.embedding(states["direction"])
-
         # Rest of the network
-        # x = torch.cat([x, y], dim=1)
         action_logits = self.fc2(x)
         action_probs = self.softmax(action_logits)
 

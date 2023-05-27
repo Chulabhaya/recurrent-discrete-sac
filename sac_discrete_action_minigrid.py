@@ -36,7 +36,7 @@ def parse_args():
         help="whether to capture videos of the agent performances (check out `videos` folder)")
 
     # Algorithm specific arguments
-    parser.add_argument("--env-id", type=str, default="MiniGrid-Empty-5x5-v0",
+    parser.add_argument("--env-id", type=str, default="MiniGrid-Empty-16x16-v0",
         help="the id of the environment")
     parser.add_argument("--total-timesteps", type=int, default=200500,
         help="total timesteps of the experiments")
@@ -109,7 +109,7 @@ if __name__ == "__main__":
             save_code=True,
             settings=wandb.Settings(code_dir="."),
             group=args.wandb_group,
-            mode="online",
+            mode="offline",
         )
 
     # Set training device
