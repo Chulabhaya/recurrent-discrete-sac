@@ -34,7 +34,7 @@ def make_env(env_id, seed, capture_video, run_name, max_episode_len=None):
     env : gym environment
         Gym environment to be used for learning.
     """
-    env = MovementActionMask(FullyObsWrapper(gym.make(env_id, max_steps=200)))
+    env = MovementToggleActionMask(FullyObsWrapper(gym.make(env_id, max_steps=200)))
     if max_episode_len is not None:
         env = gym.wrappers.TimeLimit(env, max_episode_steps=max_episode_len)
     if capture_video:
