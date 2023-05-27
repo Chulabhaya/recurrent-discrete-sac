@@ -10,6 +10,7 @@ from minigrid.wrappers import FullyObsWrapper
 
 import simple_pomdps
 from minigrid_action_wrappers.movement_action_mask import MovementActionMask
+from minigrid_action_wrappers.movement_toggle_action_mask import MovementToggleActionMask
 
 
 def make_env(env_id, seed, capture_video, run_name, max_episode_len=None):

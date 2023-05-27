@@ -834,10 +834,11 @@ class DiscreteCriticMiniGridObs(nn.Module):
         self.embedding1 = nn.Embedding(11, 4)
         self.embedding2 = nn.Embedding(6, 4)
         self.embedding3 = nn.Embedding(4, 4)
-        self.fc1 = nn.Linear(3072, 256)
+        self.fc1 = nn.Linear(3072, 1024)
+        self.fc2 = nn.Linear(1024, 256)
 
         # Remainder of network
-        self.fc2 = nn.Linear(256, env.action_space.n)
+        self.fc3 = nn.Linear(256, env.action_space.n)
 
     def forward(self, states):
         """
@@ -863,9 +864,10 @@ class DiscreteCriticMiniGridObs(nn.Module):
         x = torch.cat((obj_emb, color_emb, state_emb), dim=3)
         x = torch.flatten(x, start_dim=1)
         x = F.relu(self.fc1(x))
+        x = F.relu(self.fc2(x))
 
         # Rest of the network
-        q_values = self.fc2(x)
+        q_values = self.fc3(x)
 
         return q_values
 
@@ -888,7 +890,8 @@ class DiscreteActorMiniGridObs(nn.Module):
         self.embedding1 = nn.Embedding(11, 4)
         self.embedding2 = nn.Embedding(6, 4)
         self.embedding3 = nn.Embedding(4, 4)
-        self.fc1 = nn.Linear(3072, 256)
+        self.fc1 = nn.Linear(3072, 1024)
+        self.fc2 = nn.Linear(1024, 256)
 
         # Remainder of network
         self.fc2 = nn.Linear(256, env.action_space.n)
@@ -918,9 +921,10 @@ class DiscreteActorMiniGridObs(nn.Module):
         x = torch.cat((obj_emb, color_emb, state_emb), dim=3)
         x = torch.flatten(x, start_dim=1)
         x = F.relu(self.fc1(x))
+        x = F.relu(self.fc2(x))
 
         # Rest of the network
-        action_logits = self.fc2(x)
+        action_logits = self.fc3(x)
         action_probs = self.softmax(action_logits)
 
         return action_probs

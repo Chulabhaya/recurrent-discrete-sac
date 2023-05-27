@@ -26,7 +26,7 @@ def parse_args():
         help="seed of the experiment")
     parser.add_argument("--cuda", type=lambda x: bool(strtobool(x)), default=True, nargs="?", const=True,
         help="if toggled, cuda will be enabled by default")
-    parser.add_argument("--wandb-project", type=str, default="sac-discrete-action-minigrid-empty",
+    parser.add_argument("--wandb-project", type=str, default="sac-discrete-action-minigrid",
         help="wandb project name")
     parser.add_argument("--wandb-group", type=str, default=None,
         help="wandb group name to use for run")
@@ -36,7 +36,7 @@ def parse_args():
         help="whether to capture videos of the agent performances (check out `videos` folder)")
 
     # Algorithm specific arguments
-    parser.add_argument("--env-id", type=str, default="MiniGrid-Empty-16x16-v0",
+    parser.add_argument("--env-id", type=str, default="MiniGrid-MemoryS7-v0",
         help="the id of the environment")
     parser.add_argument("--total-timesteps", type=int, default=200500,
         help="total timesteps of the experiments")
@@ -109,7 +109,7 @@ if __name__ == "__main__":
             save_code=True,
             settings=wandb.Settings(code_dir="."),
             group=args.wandb_group,
-            mode="offline",
+            mode="online",
         )
 
     # Set training device
