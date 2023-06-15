@@ -6,11 +6,8 @@ import gymnasium_pomdps
 import numpy as np
 import torch
 from gymnasium_pomdps.wrappers.mdp import MDP
-from minigrid.wrappers import FullyObsWrapper
 
-import simple_pomdps
-from minigrid_action_wrappers.movement_action_mask import MovementActionMask
-from minigrid_action_wrappers.movement_toggle_action_mask import MovementToggleActionMask
+from common import simple_pomdps
 
 
 def make_env(env_id, seed, capture_video, run_name, max_episode_len=None):
@@ -34,7 +31,7 @@ def make_env(env_id, seed, capture_video, run_name, max_episode_len=None):
     env : gym environment
         Gym environment to be used for learning.
     """
-    env = MovementToggleActionMask(FullyObsWrapper(gym.make(env_id, max_steps=200)))
+    env = gym.make(env_id)
     if max_episode_len is not None:
         env = gym.wrappers.TimeLimit(env, max_episode_steps=max_episode_len)
     if capture_video:

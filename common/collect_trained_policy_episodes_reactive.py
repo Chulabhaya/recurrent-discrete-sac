@@ -5,7 +5,7 @@ import random
 
 import torch
 
-from models import DiscreteActor
+from models import DiscreteActorDiscreteObs
 from replay_buffer import EpisodicReplayBuffer
 from utils import make_env, set_seed
 
@@ -20,6 +20,7 @@ def collect_trained_policy_data(env, actor, device, seed, total_timesteps, epsil
     # Initialize environment interaction loop
     terminated, truncated = False, False
     obs, info = env.reset(seed=seed)
+    obs_actual = info["observation"]
 
     # Generate data
     episodic_count = 0
@@ -29,17 +30,18 @@ def collect_trained_policy_data(env, actor, device, seed, total_timesteps, epsil
         if random.random() < epsilon:
             action = env.action_space.sample()
         else:
-            action, _, _ = actor.get_actions(torch.Tensor(obs).to(device))
+            action, _, _ = actor.get_actions(torch.tensor(obs).to(device))
             action = action.detach().cpu().numpy()
 
         # Take action in environment
         next_obs, reward, terminated, truncated, info = env.step(action)
+        next_obs_actual = info["observation"]
 
         # Save data to replay buffer
         rb.add(
-            obs[[0, 2]].copy(),
+            obs_actual,
             action,
-            next_obs[[0, 2]].copy(),
+            next_obs_actual,
             reward,
             terminated,
             truncated,
@@ -47,6 +49,7 @@ def collect_trained_policy_data(env, actor, device, seed, total_timesteps, epsil
 
         # Update next obs
         obs = next_obs
+        obs_actual = next_obs_actual
 
         # If episode is over, reset environment and
         # update episode count
@@ -57,6 +60,7 @@ def collect_trained_policy_data(env, actor, device, seed, total_timesteps, epsil
             )
             episodic_count += 1
             obs, info = env.reset()
+            obs_actual = info["observation"]
 
     return rb
 
@@ -69,15 +73,15 @@ def parse_args():
         help="seed of data generation")
     parser.add_argument("--cuda", type=lambda x: bool(strtobool(x)), default=True, nargs="?", const=True,
         help="if toggled, cuda will be enabled by default")
-    parser.add_argument("--env-id", type=str, default="CartPole-v0",
+    parser.add_argument("--env-id", type=str, default="POMDP-heavenhell_2-episodic-v0",
         help="the id of the environment for the trained policy")
-    parser.add_argument("--maximum-episode-length", type=int, default=50,
+    parser.add_argument("--maximum-episode-length", type=int, default=100,
         help="maximum length for episodes for gym POMDP environment")
-    parser.add_argument("--total-timesteps", type=int, default=100000,
+    parser.add_argument("--total-timesteps", type=int, default=200000,
         help="total timesteps of data to gather from policy")
-    parser.add_argument("--checkpoint", type=str, default="/home/chulabhaya/phd/research/data/cartpole_v0/3-27-23_cartpole_v0_sac_expert_policy.pth",
+    parser.add_argument("--checkpoint", type=str, default="/home/chulabhaya/phd/research/datasets/heavenhell_2/1_million_timesteps/mdp/mdp_hh2_no_rec_seed_104_time_1684769262_x2dg6xiv_global_step_1000000.pth",
         help="path to checkpoint with trained policy")
-    parser.add_argument("--epsilon", type=float, default=1.0,
+    parser.add_argument("--epsilon", type=float, default=0.0,
         help="random action sampling percentage")
 
     args = parser.parse_args()
@@ -108,7 +112,7 @@ def main():
     checkpoint = torch.load(args.checkpoint)
 
     # Initialize actor/policy
-    actor = DiscreteActor(env).to(device)
+    actor = DiscreteActorDiscreteObs(env).to(device)
     actor.load_state_dict(checkpoint["model_state_dict"]["actor_state_dict"])
 
     # Collect dataset in a replay buffer
@@ -121,7 +125,7 @@ def main():
 
     # Save out dictionary into pickle file
     f = open(
-        "4-8-23_cartpole_v0_pomdp_sac_expert_policy_100_percent_random_data.pkl", "wb"
+        "6-2-23_mdp_hh2_no_rec_seed_104_time_1684769262_x2dg6xiv_global_step_1000000_0_percent_random_data_size_200000_mdp.pkl", "wb"
     )
     pickle.dump(rb_data, f)
     f.close()

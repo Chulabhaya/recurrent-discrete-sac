@@ -35,9 +35,9 @@ def parse_args():
         help="whether to capture videos of the agent performances (check out `videos` folder)")
 
     # Algorithm specific arguments
-    parser.add_argument("--env-id", type=str, default="CartPole-v0",
+    parser.add_argument("--env-id", type=str, default="CartPole-F-v0",
         help="the id of the environment")
-    parser.add_argument("--total-timesteps", type=int, default=200500,
+    parser.add_argument("--total-timesteps", type=int, default=1000500,
         help="total timesteps of the experiments")
     parser.add_argument("--buffer-size", type=int, default=int(1e5),
         help="the replay memory buffer size")
