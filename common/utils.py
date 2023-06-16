@@ -5,9 +5,6 @@ import gymnasium as gym
 import gymnasium_pomdps
 import numpy as np
 import torch
-from gymnasium_pomdps.wrappers.mdp import MDP
-
-from common import simple_pomdps
 
 
 def make_env(env_id, seed, capture_video, run_name, max_episode_len=None):
