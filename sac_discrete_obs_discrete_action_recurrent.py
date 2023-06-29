@@ -15,7 +15,7 @@ from common.models import (
     RecurrentDiscreteActorDiscreteObs,
     RecurrentDiscreteCriticDiscreteObs,
 )
-from common.replay_buffer import EpisodicReplayBuffer
+from common.replay_buffer import ReplayBuffer
 from common.utils import make_env, save, set_seed
 
 
@@ -200,9 +200,11 @@ if __name__ == "__main__":
 
     # Initialize replay buffer
     env.observation_space.dtype = np.float32
-    rb = EpisodicReplayBuffer(
+    rb = ReplayBuffer(
         args.buffer_size,
-        device,
+        episodic=True,
+        stateful=False,
+        device=device,
     )
     # If resuming training, then load previous replay buffer
     if args.resume:

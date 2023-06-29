@@ -12,7 +12,7 @@ import torch.optim as optim
 
 import wandb
 from common.models import RecurrentDiscreteActor, RecurrentDiscreteCritic
-from common.replay_buffer import EpisodicReplayBuffer
+from common.replay_buffer import ReplayBuffer
 from common.utils import make_env, set_seed, save
 
 
@@ -35,7 +35,7 @@ def parse_args():
         help="whether to capture videos of the agent performances (check out `videos` folder)")
 
     # Algorithm specific arguments
-    parser.add_argument("--env-id", type=str, default="CartPole-P-v0",
+    parser.add_argument("--env-id", type=str, default="CartPole-v0",
         help="the id of the environment")
     parser.add_argument("--total-timesteps", type=int, default=1000500,
         help="total timesteps of the experiments")
@@ -191,9 +191,11 @@ if __name__ == "__main__":
 
     # Initialize replay buffer
     env.observation_space.dtype = np.float32
-    rb = EpisodicReplayBuffer(
+    rb = ReplayBuffer(
         args.buffer_size,
-        device,
+        episodic=True,
+        stateful=False,
+        device=device,
     )
     # If resuming training, then load previous replay buffer
     if args.resume:

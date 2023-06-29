@@ -191,8 +191,12 @@ if __name__ == "__main__":
         alpha = args.alpha
 
     # Initialize replay buffer
-    env.observation_space.dtype = np.float32
-    rb = ReplayBuffer(args.buffer_size, env.observation_space, env.action_space, device)
+    rb = ReplayBuffer(
+        args.buffer_size,
+        episodic=False,
+        stateful=False,
+        device=device,
+    )
     # If resuming training, then load previous replay buffer
     if args.resume:
         rb_data = checkpoint["replay_buffer"]

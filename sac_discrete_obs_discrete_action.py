@@ -199,9 +199,9 @@ if __name__ == "__main__":
     env.observation_space.dtype = np.float32
     rb = ReplayBuffer(
         args.buffer_size,
-        env.observation_space,
-        env.action_space,
-        device,
+        episodic=False,
+        stateful=False,
+        device=device,
     )
     # If resuming training, then load previous replay buffer
     if args.resume:
@@ -264,8 +264,6 @@ if __name__ == "__main__":
             observations, actions, next_observations, rewards, terminateds = rb.sample(
                 args.batch_size
             )
-            observations = observations.squeeze(1).long()
-            next_observations = next_observations.squeeze(1).long()
             # ---------- update critic ---------- #
             # no grad because target networks are updated separately (pg. 6 of
             # updated SAC paper)
