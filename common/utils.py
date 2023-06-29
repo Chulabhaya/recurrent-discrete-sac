@@ -7,35 +7,26 @@ import numpy as np
 import torch
 
 
-def make_env(env_id, seed, capture_video, run_name, max_episode_len=None):
-    """Generates seeded environment.
+def make_env(env_id, seed, max_episode_len=None):
+    """
+    Generate environment with seeding/wrapping.
 
-    Parameters
-    ----------
-    env_id : string
-        Name of Gym environment.
-    seed : int
-        Seed.
-    idx : int
-        Whether to record videos or not.
-    capture_video : boolean
-        Whether to record videos or not.
-    run_name : string
-        Name of run to be used for video.
+    Args:
+        env_id: ID of the environment to use.
+        seed: Seed to set for environment.
+        max_episode_len: Episode timeout length.
 
-    Returns
-    -------
-    env : gym environment
-        Gym environment to be used for learning.
+    Returns:
+        Generated environment.
+
     """
     env = gym.make(env_id)
     if max_episode_len is not None:
         env = gym.wrappers.TimeLimit(env, max_episode_steps=max_episode_len)
-    if capture_video:
-        env = gym.wrappers.RecordVideo(env, f"videos/{run_name}")
     env = gym.wrappers.RecordEpisodeStatistics(env)
     env.action_space.seed(seed)
     env.observation_space.seed(seed)
+
     return env
 
 
@@ -48,6 +39,18 @@ def save(
     replay_buffer,
     rng_states,
 ):
+    """
+    Saves a checkpoint.
+
+    Args:
+        run_id: Wandb ID of run.
+        checkpoint_dir: Directory to store checkpoint in.
+        global_step: Timestep of training.
+        models: State dict of models.
+        optimizers: State dict of optimizers.
+        replay_buffer: Replay buffer.
+        rng_states: RNG states.
+    """
     save_dir = checkpoint_dir + run_id + "/"
 
     if not os.path.exists(save_dir):
@@ -70,6 +73,13 @@ def save(
 
 
 def set_seed(seed, device):
+    """
+    Sets seeding for experiment.
+
+    Args:
+        seed: Seed.
+        device: Device being used.
+    """
     os.environ["PYTHONHASHSEED"] = str(seed)
     random.seed(seed)
     np.random.seed(seed)

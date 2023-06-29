@@ -31,8 +31,6 @@ def parse_args():
         help="wandb group name to use for run")
     parser.add_argument("--wandb-dir", type=str, default="./",
         help="the wandb directory")
-    parser.add_argument("--capture-video", type=lambda x: bool(strtobool(x)), default=False, nargs="?", const=True,
-        help="whether to capture videos of the agent performances (check out `videos` folder)")
 
     # Algorithm specific arguments
     parser.add_argument("--env-id", type=str, default="CartPole-v0",
@@ -137,7 +135,7 @@ if __name__ == "__main__":
             )
 
     # Env setup
-    env = make_env(args.env_id, args.seed, args.capture_video, run_name)
+    env = make_env(args.env_id, args.seed)
     assert isinstance(
         env.action_space, gym.spaces.Discrete
     ), "only discrete action space is supported"

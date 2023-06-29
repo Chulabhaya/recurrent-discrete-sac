@@ -24,7 +24,6 @@ class ReplayBuffer:
             stateful: Whether the buffer should store states in addition
                 to observations.
             device: What device to return buffer samples on.
-
         """
         # Set size of buffer
         self._buffer_size = size
@@ -72,7 +71,6 @@ class ReplayBuffer:
 
         Returns:
             Dictionary containing all buffer data.
-
         """
         buffer_data = {
             "obs": self._obs,
@@ -96,7 +94,6 @@ class ReplayBuffer:
 
         Args:
             buffer_data: Data to load into buffer.
-
         """
         self._obs = buffer_data["obs"]
         self._actions = buffer_data["actions"]
@@ -133,7 +130,6 @@ class ReplayBuffer:
             truncated: Truncated status.
             state: State, optional.
             next_state: Next state, optional.
-
         """
         # If episodic buffer then use intermediary episode storage
         if self._episodic:
@@ -207,7 +203,8 @@ class ReplayBuffer:
                 self._timesteps_in_buffer -= 1
 
     def sample(self, batch_size=256, history_length=None):
-        """Sample batch of episodes/samples from replay buffer.
+        """
+        Sample batch of episodes/samples from replay buffer.
 
         Args:
             batch_size: Size of batch to sample from buffer.
@@ -217,7 +214,6 @@ class ReplayBuffer:
 
         Returns:
             Batch of tensors of samples/episodes.
-
         """
         # Generate indices for random samples/episodes
         upper_bound = len(self._obs)
