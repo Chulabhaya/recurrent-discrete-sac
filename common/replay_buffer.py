@@ -153,8 +153,8 @@ class ReplayBuffer:
                 self._terminateds.append(self._ongoing_terminateds)
                 self._truncateds.append(self._ongoing_truncateds)
                 if self._stateful:
-                    self._ongoing_states.append(state)
-                    self._ongoing_next_states.append(next_state)
+                    self._states.append(self._ongoing_states)
+                    self._next_states.append(self._ongoing_next_states)
 
                 # Update buffer size tracking
                 self._timesteps_in_buffer += len(self._ongoing_obs)
