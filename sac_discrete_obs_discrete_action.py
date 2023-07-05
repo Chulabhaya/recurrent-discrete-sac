@@ -145,11 +145,15 @@ if __name__ == "__main__":
     ), "only discrete action space is supported"
 
     # Initialize models and optimizers
-    actor = DiscreteActorDiscreteObs(env).to(device)
-    qf1 = DiscreteCriticDiscreteObs(env).to(device)
-    qf2 = DiscreteCriticDiscreteObs(env).to(device)
-    qf1_target = DiscreteCriticDiscreteObs(env).to(device)
-    qf2_target = DiscreteCriticDiscreteObs(env).to(device)
+    model_config = {
+        "input_size": env.observation_space.n,
+        "output_size": env.action_space.n
+    }
+    actor = DiscreteActorDiscreteObs(model_config).to(device)
+    qf1 = DiscreteCriticDiscreteObs(model_config).to(device)
+    qf2 = DiscreteCriticDiscreteObs(model_config).to(device)
+    qf1_target = DiscreteCriticDiscreteObs(model_config).to(device)
+    qf2_target = DiscreteCriticDiscreteObs(model_config).to(device)
     qf1_target.load_state_dict(qf1.state_dict())
     qf2_target.load_state_dict(qf2.state_dict())
     q_optimizer = optim.Adam(

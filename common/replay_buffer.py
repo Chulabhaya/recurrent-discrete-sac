@@ -312,18 +312,10 @@ class ReplayBuffer:
                     )
                     if self._stateful:
                         batch_states.append(
-                            torch.as_tensor(
-                                np.array(self._states[batch_inds[i]])[
-                                    episode_ind_start:episode_ind_end
-                                ]
-                            )
+                            torch.as_tensor(np.array(self._states[batch_inds[i]]))
                         )
                         batch_next_states.append(
-                            torch.as_tensor(
-                                np.array(self._next_states[batch_inds[i]])[
-                                    episode_ind_start:episode_ind_end
-                                ]
-                            )
+                            torch.as_tensor(np.array(self._next_states[batch_inds[i]]))
                         )
 
             # Create padded arrays of history
@@ -362,18 +354,10 @@ class ReplayBuffer:
                 )
                 if self._stateful:
                     batch_states.append(
-                        torch.as_tensor(
-                            np.array(self._states[batch_inds[i]])[
-                                episode_ind_start:episode_ind_end
-                            ]
-                        )
+                        torch.as_tensor(np.array(self._states[batch_inds[i]]))
                     )
                     batch_next_states.append(
-                        torch.as_tensor(
-                            np.array(self._next_states[batch_inds[i]])[
-                                episode_ind_start:episode_ind_end
-                            ]
-                        )
+                        torch.as_tensor(np.array(self._next_states[batch_inds[i]]))
                     )
 
             batch_obs = torch.stack(tuple(batch_obs)).to(self._device)
