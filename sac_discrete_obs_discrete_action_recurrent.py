@@ -24,14 +24,14 @@ def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--exp-name", type=str, default=os.path.basename(__file__).rstrip(".py"),
         help="the name of this experiment")
+    parser.add_argument("--exp-group", type=str, default=None,
+        help="the group under which this experiment falls")
     parser.add_argument("--seed", type=int, default=1,
         help="seed of the experiment")
     parser.add_argument("--cuda", type=lambda x: bool(strtobool(x)), default=True, nargs="?", const=True,
         help="if toggled, cuda will be enabled by default")
     parser.add_argument("--wandb-project", type=str, default="sac-discrete-obs-discrete-action-recurrent",
         help="wandb project name")
-    parser.add_argument("--wandb-group", type=str, default=None,
-        help="wandb group name to use for run")
     parser.add_argument("--wandb-dir", type=str, default="./",
         help="the wandb directory")
 
@@ -110,7 +110,6 @@ if __name__ == "__main__":
             name=run_name,
             save_code=True,
             settings=wandb.Settings(code_dir="."),
-            group=args.wandb_group,
             mode="offline",
         )
 
