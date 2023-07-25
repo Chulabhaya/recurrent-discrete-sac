@@ -11,9 +11,9 @@ import torch.nn.functional as F
 import torch.optim as optim
 
 import wandb
-from common.models import DiscreteActor, DiscreteCritic
-from common.replay_buffer import ReplayBuffer
-from common.utils import make_env, save, set_seed
+from common.models import DiscreteActorGridVerseObs, DiscreteCriticGridVerseObs
+from common.replay_buffer import GridVerseReplayBuffer as ReplayBuffer
+from common.utils import make_env_gv, save, set_seed
 
 
 def parse_args():
@@ -21,22 +21,26 @@ def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--exp-name", type=str, default=os.path.basename(__file__).rstrip(".py"),
         help="the name of this experiment")
-    parser.add_argument("--exp-group", type=str, default=None,
-        help="the group under which this experiment falls")
     parser.add_argument("--seed", type=int, default=1,
         help="seed of the experiment")
     parser.add_argument("--cuda", type=lambda x: bool(strtobool(x)), default=True, nargs="?", const=True,
         help="if toggled, cuda will be enabled by default")
-    parser.add_argument("--wandb-project", type=str, default="sac-discrete-action",
+    parser.add_argument("--wandb-project", type=str, default="sac-discrete-action-minigrid",
         help="wandb project name")
-    parser.add_argument("--wandb-dir", type=str, default="./",
+    parser.add_argument("--wandb-group", type=str, default=None,
+        help="wandb group name to use for run")
+    parser.add_argument("--wandb-dir", type=str, default="./test",
         help="the wandb directory")
+    parser.add_argument("--capture-video", type=lambda x: bool(strtobool(x)), default=False, nargs="?", const=True,
+        help="whether to capture videos of the agent performances (check out `videos` folder)")
 
     # Algorithm specific arguments
-    parser.add_argument("--env-id", type=str, default="LunarLander-F-v0",
+    parser.add_argument("--env-id", type=str, default="gv_keydoor.5x5",
         help="the id of the environment")
-    parser.add_argument("--total-timesteps", type=int, default=1000500,
+    parser.add_argument("--total-timesteps", type=int, default=20500,
         help="total timesteps of the experiments")
+    parser.add_argument("--maximum-episode-length", type=int, default=100,
+        help="maximum length for episodes for gym POMDP environment")
     parser.add_argument("--buffer-size", type=int, default=int(1e5),
         help="the replay memory buffer size")
     parser.add_argument("--gamma", type=float, default=0.99,
@@ -65,7 +69,7 @@ def parse_args():
         help="checkpoint saving during training")
     parser.add_argument("--save-checkpoint-dir", type=str, default="./trained_models/",
         help="path to directory to save checkpoints in")
-    parser.add_argument("--checkpoint-interval", type=int, default=5000,
+    parser.add_argument("--checkpoint-interval", type=int, default=100000,
         help="how often to save checkpoints during training (in timesteps)")
     parser.add_argument("--resume", type=lambda x: bool(strtobool(x)), default=False, nargs="?", const=True,
         help="whether to resume training from a checkpoint")
@@ -105,7 +109,8 @@ if __name__ == "__main__":
             name=run_name,
             save_code=True,
             settings=wandb.Settings(code_dir="."),
-            mode="offline",
+            group=args.wandb_group,
+            mode="online",
         )
 
     # Set training device
@@ -132,17 +137,17 @@ if __name__ == "__main__":
             )
 
     # Env setup
-    env = make_env(args.env_id, args.seed)
+    env = make_env_gv(args.env_id, args.seed, max_episode_len=args.maximum_episode_length)
     assert isinstance(
         env.action_space, gym.spaces.Discrete
     ), "only discrete action space is supported"
 
     # Initialize models and optimizers
-    actor = DiscreteActor(env).to(device)
-    qf1 = DiscreteCritic(env).to(device)
-    qf2 = DiscreteCritic(env).to(device)
-    qf1_target = DiscreteCritic(env).to(device)
-    qf2_target = DiscreteCritic(env).to(device)
+    actor = DiscreteActorGridVerseObs(env).to(device)
+    qf1 = DiscreteCriticGridVerseObs(env).to(device)
+    qf2 = DiscreteCriticGridVerseObs(env).to(device)
+    qf1_target = DiscreteCriticGridVerseObs(env).to(device)
+    qf2_target = DiscreteCriticGridVerseObs(env).to(device)
     qf1_target.load_state_dict(qf1.state_dict())
     qf2_target.load_state_dict(qf2.state_dict())
     q_optimizer = optim.Adam(
@@ -188,9 +193,7 @@ if __name__ == "__main__":
     env.observation_space.dtype = np.float32
     rb = ReplayBuffer(
         args.buffer_size,
-        episodic=False,
-        stateful=False,
-        device=device,
+        device,
     )
     # If resuming training, then load previous replay buffer
     if args.resume:
@@ -224,8 +227,13 @@ if __name__ == "__main__":
         if global_step < args.learning_starts:
             action = env.action_space.sample()
         else:
-            action, _, _ = actor.get_actions(torch.tensor(obs).to(device))
-            action = action.detach().cpu().numpy()
+            obs_subset = {
+                "grid": torch.tensor(obs["grid"]).to(device).unsqueeze(0),
+                "agent_id_grid": torch.tensor(obs["agent_id_grid"]).to(device).unsqueeze(0),
+                "agent": torch.tensor(obs["agent"], dtype=torch.float32).to(device).unsqueeze(0)
+            }
+            action, _, _ = actor.get_actions(obs_subset)
+            action = action.detach().cpu().numpy()[0]
 
         # Take step in environment
         next_obs, reward, terminated, truncated, info = env.step(action)

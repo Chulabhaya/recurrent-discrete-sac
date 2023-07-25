@@ -6,6 +6,60 @@ import gymnasium_pomdps
 import numpy as np
 import torch
 
+import popgym
+from popgym.wrappers import Markovian
+
+import gym_gridverse
+from gym_gridverse.envs.yaml.factory import factory_env_from_yaml
+from gym_gridverse.gym import outer_env_factory, GymEnvironment
+from gym_gridverse.representations.observation_representations import (
+    make_observation_representation,
+)
+from gym_gridverse.representations.state_representations import (
+    make_state_representation,
+)
+from gym_gridverse.outer_env import OuterEnv
+from gym_gridverse.gym import GymStateWrapper
+
+
+def make_env_gv(env_id, seed, max_episode_len=None):
+    """
+    Generate environment with seeding/wrapping.
+
+    Args:
+        env_id: ID of the environment to use.
+        seed: Seed to set for environment.
+        max_episode_len: Episode timeout length.
+
+    Returns:
+        Generated environment.
+
+    """
+    inner_env = factory_env_from_yaml("gridverse/" + env_id + ".yaml")
+    state_representation = make_state_representation(
+        "compact",
+        inner_env.state_space,
+    )
+    observation_representation = make_observation_representation(
+        "compact",
+        inner_env.observation_space,
+    )
+    outer_env = OuterEnv(
+        inner_env,
+        state_representation=state_representation,
+        observation_representation=observation_representation,
+    )
+    env = gym.make(
+        "GymV21Environment-v0", env=GymStateWrapper(GymEnvironment(outer_env))
+    )
+    if max_episode_len is not None:
+        env = gym.wrappers.TimeLimit(env, max_episode_steps=max_episode_len)
+    env = gym.wrappers.RecordEpisodeStatistics(env)
+    env.action_space.seed(seed)
+    env.observation_space.seed(seed)
+
+    return env
+
 
 def make_env(env_id, seed, max_episode_len=None):
     """

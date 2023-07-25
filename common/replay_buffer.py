@@ -418,3 +418,218 @@ class ReplayBuffer:
                     batch_rewards,
                     batch_terminateds,
                 )
+
+
+class GridVerseReplayBuffer:
+    """Replay buffer that stores timesteps of data from MiniGrid environments."""
+
+    def __init__(
+        self,
+        buffer_size,
+        device="cpu",
+    ):
+        """Initialize the MiniGrid replay buffer.
+
+        Parameters
+        ----------
+        buffer_size : int
+            Maximum potential size of buffer in timesteps.
+        device : string
+            Device on which samples from buffer should be returned.
+        """
+        self.buffer_size = buffer_size
+
+        # Store timesteps
+        self.obs = deque()
+        self.actions = deque()
+        self.next_obs = deque()
+        self.rewards = deque()
+        self.terminateds = deque()
+        self.truncateds = deque()
+
+        self.timesteps_in_buffer = 0
+        self.device = device
+
+    def save_buffer(self):
+        """Saves content of buffer to allow for later reloading.
+
+        Returns
+        -------
+        buffer_data : dict
+            Dictionary containing current status of buffer.
+        """
+        buffer_data = {
+            "obs": self.obs,
+            "actions": self.actions,
+            "next_obs": self.next_obs,
+            "rewards": self.rewards,
+            "terminateds": self.terminateds,
+            "truncateds": self.truncateds,
+            "timesteps_in_buffer": self.timesteps_in_buffer,
+        }
+
+        return buffer_data
+
+    def load_buffer(self, buffer_data):
+        """Load data from prior saved replay buffer.
+
+        Parameters
+        ----------
+        buffer_data : dict
+            Dictionary containing saved replay buffer data.
+        """
+        self.obs = buffer_data["obs"]
+        self.actions = buffer_data["actions"]
+        self.next_obs = buffer_data["next_obs"]
+        self.rewards = buffer_data["rewards"]
+        self.terminateds = buffer_data["terminateds"]
+        self.truncateds = buffer_data["truncateds"]
+        self.timesteps_in_buffer = buffer_data["timesteps_in_buffer"]
+
+    def add(self, obs, action, next_obs, reward, terminated, truncated):
+        """Adds a timestep of data to simple replay buffer.
+
+        Parameters
+        ----------
+        obs : int
+            Observation.
+        action : int
+            Action.
+        next_obs : int
+            Next observation.
+        reward : float
+            Reward.
+        terminated : bool
+            Terminated status.
+        truncated : bool
+            Truncated status.
+        """
+
+        # Update on-going episode with new timestep
+        self.obs.append(obs)
+        self.actions.append(action)
+        self.next_obs.append(next_obs)
+        self.rewards.append(reward)
+        self.terminateds.append(terminated)
+        self.truncateds.append(truncated)
+
+        # Update buffer size tracking
+        self.timesteps_in_buffer += 1
+
+        # Ensure that buffer size isn't over the limit
+        # by removing the earliest timesteps in the buffer
+        while self.timesteps_in_buffer > self.buffer_size:
+            self.obs.popleft()
+            self.actions.popleft()
+            self.next_obs.popleft()
+            self.rewards.popleft()
+            self.terminateds.popleft()
+            self.truncateds.popleft()
+
+            self.timesteps_in_buffer -= 1
+
+    def sample(self, batch_size=256):
+        """Sample batch of episodes from simple replay buffer.
+
+        Parameters
+        ----------
+        batch_size : int
+            Size of batch to sample from buffer.
+
+        Returns
+        -------
+        batch_obs : tensor
+            Batched and padded episode observations.
+        batch_actions : tensor
+            Batched and padded episode actions.
+        batch_next_obs : tensor
+            Batched and padded episode next observations.
+        batch_rewards : tensor
+            Batched and padded episode rewards.
+        batch_terminateds : tensor
+            Batched and padded episode terminations.
+        seq_lengths : tensor
+            Sequence lengths to keep track of padding.
+        """
+        # Generate indices for random episodes
+        upper_bound = len(self.obs)
+        batch_inds = np.random.randint(0, upper_bound, size=batch_size)
+
+        # Deques for storing batch to return
+        batch_grid_obs = deque()
+        batch_agent_id_grid_obs = deque()
+        batch_agent_obs = deque()
+        batch_actions = deque()
+        batch_grid_next_obs = deque()
+        batch_agent_id_grid_next_obs = deque()
+        batch_agent_next_obs = deque()
+        batch_rewards = deque()
+        batch_terminateds = deque()
+
+        # Generate batch
+        for i in range(batch_size):
+            batch_grid_obs.append(
+                torch.as_tensor(np.array(self.obs[batch_inds[i]]["grid"]))
+            )
+            batch_agent_id_grid_obs.append(
+                torch.as_tensor(np.array(self.obs[batch_inds[i]]["agent_id_grid"]))
+            )
+            batch_agent_obs.append(
+                torch.as_tensor(np.array(self.obs[batch_inds[i]]["agent"]), dtype=torch.float32)
+            )
+            batch_actions.append(torch.as_tensor(np.array(self.actions[batch_inds[i]])))
+            batch_grid_next_obs.append(
+                torch.as_tensor(np.array(self.next_obs[batch_inds[i]]["grid"]))
+            )
+            batch_agent_id_grid_next_obs.append(
+                torch.as_tensor(np.array(self.next_obs[batch_inds[i]]["agent_id_grid"]))
+            )
+            batch_agent_next_obs.append(
+                torch.as_tensor(np.array(self.next_obs[batch_inds[i]]["agent"]), dtype=torch.float32)
+            )
+            batch_rewards.append(
+                torch.as_tensor(np.array(self.rewards[batch_inds[i]], dtype=np.float32))
+            )
+            batch_terminateds.append(
+                torch.as_tensor(np.array(self.terminateds[batch_inds[i]]))
+            )
+
+        batch_grid_obs = torch.stack(tuple(batch_grid_obs)).to(self.device).long()
+        batch_agent_id_grid_obs = (
+            torch.stack(tuple(batch_agent_id_grid_obs)).to(self.device).long()
+        )
+        batch_agent_obs = torch.stack(tuple(batch_agent_obs)).to(self.device)
+        batch_actions = torch.unsqueeze(
+            torch.stack(tuple(batch_actions)).to(self.device), 1
+        )
+        batch_grid_next_obs = (
+            torch.stack(tuple(batch_grid_next_obs)).to(self.device).long()
+        )
+        batch_agent_id_grid_next_obs = (
+            torch.stack(tuple(batch_agent_id_grid_next_obs)).to(self.device).long()
+        )
+        batch_agent_next_obs = torch.stack(tuple(batch_agent_next_obs)).to(self.device)
+        batch_rewards = torch.unsqueeze(
+            torch.stack(tuple(batch_rewards)).to(self.device), 1
+        )
+        batch_terminateds = torch.unsqueeze(
+            torch.stack(tuple(batch_terminateds)).to(self.device), 1
+        ).long()
+        batch_obs = {
+            "grid": batch_grid_obs,
+            "agent_id_grid": batch_agent_id_grid_obs,
+            "agent": batch_agent_obs,
+        }
+        batch_next_obs = {
+            "grid": batch_grid_next_obs,
+            "agent_id_grid": batch_agent_id_grid_next_obs,
+            "agent": batch_agent_next_obs,
+        }
+
+        return (
+            batch_obs,
+            batch_actions,
+            batch_next_obs,
+            batch_rewards,
+            batch_terminateds,
+        )
