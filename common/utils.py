@@ -6,8 +6,8 @@ import gymnasium_pomdps
 import numpy as np
 import torch
 
-import popgym
-from popgym.wrappers import Markovian
+# import popgym
+# from popgym.wrappers import Markovian
 
 import gym_gridverse
 from gym_gridverse.envs.yaml.factory import factory_env_from_yaml

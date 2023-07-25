@@ -21,23 +21,21 @@ def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--exp-name", type=str, default=os.path.basename(__file__).rstrip(".py"),
         help="the name of this experiment")
+    parser.add_argument("--exp-group", type=str, default=None,
+        help="the group under which this experiment falls")
     parser.add_argument("--seed", type=int, default=1,
         help="seed of the experiment")
     parser.add_argument("--cuda", type=lambda x: bool(strtobool(x)), default=True, nargs="?", const=True,
         help="if toggled, cuda will be enabled by default")
-    parser.add_argument("--wandb-project", type=str, default="sac-discrete-action-minigrid",
+    parser.add_argument("--wandb-project", type=str, default="sac-gridverse-obs-discrete-action",
         help="wandb project name")
-    parser.add_argument("--wandb-group", type=str, default=None,
-        help="wandb group name to use for run")
-    parser.add_argument("--wandb-dir", type=str, default="./test",
+    parser.add_argument("--wandb-dir", type=str, default="./",
         help="the wandb directory")
-    parser.add_argument("--capture-video", type=lambda x: bool(strtobool(x)), default=False, nargs="?", const=True,
-        help="whether to capture videos of the agent performances (check out `videos` folder)")
 
     # Algorithm specific arguments
-    parser.add_argument("--env-id", type=str, default="gv_keydoor.5x5",
+    parser.add_argument("--env-id", type=str, default="POMDP-heavenhell_1-episodic-v0",
         help="the id of the environment")
-    parser.add_argument("--total-timesteps", type=int, default=20500,
+    parser.add_argument("--total-timesteps", type=int, default=100000,
         help="total timesteps of the experiments")
     parser.add_argument("--maximum-episode-length", type=int, default=100,
         help="maximum length for episodes for gym POMDP environment")
@@ -69,14 +67,15 @@ def parse_args():
         help="checkpoint saving during training")
     parser.add_argument("--save-checkpoint-dir", type=str, default="./trained_models/",
         help="path to directory to save checkpoints in")
-    parser.add_argument("--checkpoint-interval", type=int, default=100000,
+    parser.add_argument("--checkpoint-interval", type=int, default=5000,
         help="how often to save checkpoints during training (in timesteps)")
     parser.add_argument("--resume", type=lambda x: bool(strtobool(x)), default=False, nargs="?", const=True,
         help="whether to resume training from a checkpoint")
-    parser.add_argument("--resume-checkpoint-path", type=str, default="./trained_models/CartPole-v0__sac_discrete_action__1__1680268581__07jx3mba/global_step_35000.pth",
+    parser.add_argument("--resume-checkpoint-path", type=str, default=None,
         help="path to checkpoint to resume training from")
-    parser.add_argument("--run-id", type=str, default="CartPole-v0__sac_discrete_action__1__1680268581__07jx3mba",
+    parser.add_argument("--run-id", type=str, default=None,
         help="wandb unique run id for resuming")
+
 
     args = parser.parse_args()
     # fmt: on
