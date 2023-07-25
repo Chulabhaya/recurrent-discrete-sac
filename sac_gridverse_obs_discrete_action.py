@@ -76,7 +76,6 @@ def parse_args():
     parser.add_argument("--run-id", type=str, default=None,
         help="wandb unique run id for resuming")
 
-
     args = parser.parse_args()
     # fmt: on
     return args
@@ -108,8 +107,7 @@ if __name__ == "__main__":
             name=run_name,
             save_code=True,
             settings=wandb.Settings(code_dir="."),
-            group=args.wandb_group,
-            mode="online",
+            mode="offline",
         )
 
     # Set training device
