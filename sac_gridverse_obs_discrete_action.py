@@ -27,13 +27,13 @@ def parse_args():
         help="seed of the experiment")
     parser.add_argument("--cuda", type=lambda x: bool(strtobool(x)), default=True, nargs="?", const=True,
         help="if toggled, cuda will be enabled by default")
-    parser.add_argument("--wandb-project", type=str, default="sac-gridverse-obs-discrete-action",
+    parser.add_argument("--wandb-project", type=str, default="gridverse",
         help="wandb project name")
     parser.add_argument("--wandb-dir", type=str, default="./",
         help="the wandb directory")
 
     # Algorithm specific arguments
-    parser.add_argument("--env-id", type=str, default="POMDP-heavenhell_1-episodic-v0",
+    parser.add_argument("--env-id", type=str, default="gridverse/gv_memory.5x5.yaml",
         help="the id of the environment")
     parser.add_argument("--total-timesteps", type=int, default=100000,
         help="total timesteps of the experiments")
@@ -67,7 +67,7 @@ def parse_args():
         help="checkpoint saving during training")
     parser.add_argument("--save-checkpoint-dir", type=str, default="./trained_models/",
         help="path to directory to save checkpoints in")
-    parser.add_argument("--checkpoint-interval", type=int, default=5000,
+    parser.add_argument("--checkpoint-interval", type=int, default=100000,
         help="how often to save checkpoints during training (in timesteps)")
     parser.add_argument("--resume", type=lambda x: bool(strtobool(x)), default=False, nargs="?", const=True,
         help="whether to resume training from a checkpoint")
@@ -107,7 +107,7 @@ if __name__ == "__main__":
             name=run_name,
             save_code=True,
             settings=wandb.Settings(code_dir="."),
-            mode="offline",
+            mode="online",
         )
 
     # Set training device

@@ -1,32 +1,33 @@
 state_space:
-  objects: [ Wall, Floor, Exit, Door, Key ]
-  colors: [ NONE, YELLOW ]
+  objects: [ Wall, Floor, Exit, Telepod ]
+  colors: [ NONE, RED ]
+
+action_space:
+  - MOVE_FORWARD
+  - MOVE_BACKWARD
+  - MOVE_LEFT
+  - MOVE_RIGHT
+  - TURN_LEFT
+  - TURN_RIGHT
 
 observation_space:
-  objects: [ Wall, Floor, Exit, Door, Key ]
-  colors: [ NONE, YELLOW ]
+  objects: [ Wall, Floor, Exit, Telepod ]
+  colors: [ NONE, RED ]
 
 reset_function:
-  name: keydoor
-  shape: [ 9, 9 ]
+  name: teleport
+  shape: [ 5, 5 ]
+  random_agent: True
 
 transition_functions:
   - name: move_agent
   - name: turn_agent
-  - name: actuate_door
-  - name: pickndrop
+  - name: teleport
 
 reward_functions:
   - name: reach_exit
     reward_on: 5.0
     reward_off: 0.0
-  - name: pickndrop
-    object_type: Key
-    reward_pick: 1.0
-    reward_drop: -1.0
-  - name: actuate_door
-    reward_open: 1.0
-    reward_close: -1.0
   - name: getting_closer
     distance_function: manhattan
     object_type: Exit

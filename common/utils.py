@@ -6,9 +6,6 @@ import gymnasium_pomdps
 import numpy as np
 import torch
 
-# import popgym
-# from popgym.wrappers import Markovian
-
 import gym_gridverse
 from gym_gridverse.envs.yaml.factory import factory_env_from_yaml
 from gym_gridverse.gym import outer_env_factory, GymEnvironment
@@ -35,7 +32,7 @@ def make_env_gv(env_id, seed, max_episode_len=None):
         Generated environment.
 
     """
-    inner_env = factory_env_from_yaml("gridverse/" + env_id + ".yaml")
+    inner_env = factory_env_from_yaml(env_id)
     state_representation = make_state_representation(
         "compact",
         inner_env.state_space,

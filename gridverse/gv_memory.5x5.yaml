@@ -15,12 +15,9 @@ observation_space:
   colors: [ NONE, RED, GREEN, BLUE, YELLOW ]
 
 reset_function:
-  name: memory_rooms
-  shape: [ 7, 7 ]
-  layout: [ 2, 2 ]
+  name: memory
+  shape: [ 5, 5 ]
   colors: [ RED, GREEN, BLUE, YELLOW ]
-  num_beacons: 1
-  num_exits: 2
 
 transition_functions:
   - name: move_agent
