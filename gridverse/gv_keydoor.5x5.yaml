@@ -8,7 +8,7 @@ observation_space:
 
 reset_function:
   name: keydoor
-  shape: [ 5, 5 ]
+  shape: [ 7, 7 ]
 
 transition_functions:
   - name: move_agent

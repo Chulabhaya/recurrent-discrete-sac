@@ -16,8 +16,8 @@ observation_space:
 
 reset_function:
   name: dynamic_obstacles
-  shape: [ 5, 5 ]
-  num_obstacles: 1
+  shape: [ 7, 7 ]
+  num_obstacles: 2
   random_agent: False
 
 transition_functions:

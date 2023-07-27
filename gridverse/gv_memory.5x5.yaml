@@ -16,7 +16,7 @@ observation_space:
 
 reset_function:
   name: memory
-  shape: [ 5, 5 ]
+  shape: [ 7, 7 ]
   colors: [ RED, GREEN, BLUE, YELLOW ]
 
 transition_functions:
