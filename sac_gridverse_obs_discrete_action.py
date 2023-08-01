@@ -27,15 +27,15 @@ def parse_args():
         help="seed of the experiment")
     parser.add_argument("--cuda", type=lambda x: bool(strtobool(x)), default=True, nargs="?", const=True,
         help="if toggled, cuda will be enabled by default")
-    parser.add_argument("--wandb-project", type=str, default="gridverse",
+    parser.add_argument("--wandb-project", type=str, default="gridversetest",
         help="wandb project name")
     parser.add_argument("--wandb-dir", type=str, default="./",
         help="the wandb directory")
 
     # Algorithm specific arguments
-    parser.add_argument("--env-id", type=str, default="gridverse/gv_memory.5x5.yaml",
+    parser.add_argument("--env-id", type=str, default="gridverse/gv_keydoor.5x5.yaml",
         help="the id of the environment")
-    parser.add_argument("--total-timesteps", type=int, default=100000,
+    parser.add_argument("--total-timesteps", type=int, default=1000000,
         help="total timesteps of the experiments")
     parser.add_argument("--maximum-episode-length", type=int, default=100,
         help="maximum length for episodes for gym POMDP environment")
@@ -151,6 +151,11 @@ if __name__ == "__main__":
         list(qf1.parameters()) + list(qf2.parameters()), lr=args.q_lr
     )
     actor_optimizer = optim.Adam(list(actor.parameters()), lr=args.policy_lr)
+
+    # Watch gradients
+    wandb.watch(actor, log='all')
+    wandb.watch(qf1, log='all')
+    wandb.watch(qf2, log='all')
 
     # If resuming training, load models and optimizers
     if args.resume:
@@ -292,6 +297,8 @@ if __name__ == "__main__":
             # calculate eq. 6 in updated SAC paper
             q_optimizer.zero_grad()
             qf_loss.backward()
+            torch.nn.utils.clip_grad_value_(qf1.parameters(), clip_value=1)
+            torch.nn.utils.clip_grad_value_(qf2.parameters(), clip_value=1)
             q_optimizer.step()
 
             # ---------- update actor ---------- #
