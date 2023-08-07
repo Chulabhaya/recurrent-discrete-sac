@@ -112,7 +112,7 @@ if __name__ == "__main__":
             name=run_name,
             save_code=True,
             settings=wandb.Settings(code_dir="."),
-            mode="online",
+            mode="offline",
         )
 
     # Set training device

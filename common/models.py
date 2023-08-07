@@ -1,9 +1,10 @@
-import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.distributions import Categorical
+import numpy as np
 from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
+from torch.distributions import Categorical
+
 
 LOG_STD_MAX = 2
 LOG_STD_MIN = -5
@@ -374,7 +375,7 @@ class RecurrentDiscreteActor(nn.Module):
         self.fc1 = nn.Linear(np.array(env.observation_space.shape).prod(), 256)
         self.lstm1 = nn.LSTM(256, 256)
         self.fc2 = nn.Linear(256, 256)
-        self.fc3 = nn.Linear(256, env.action_space.n)
+        self.fc_out = nn.Linear(256, env.action_space.n)
         self.softmax = nn.Softmax(dim=-1)
 
     def forward(self, states, seq_lengths, in_hidden=None):
@@ -408,12 +409,12 @@ class RecurrentDiscreteActor(nn.Module):
 
         # Remaining layers
         x = F.relu(self.fc2(x))
-        action_logits = self.fc3(x)
+        action_logits = self.fc_out(x)
         action_probs = self.softmax(action_logits)
 
         return action_probs, out_hidden
 
-    def get_actions(self, states, seq_lengths, in_hidden=None):
+    def get_actions(self, states, seq_lengths, in_hidden=None, epsilon=1e-6):
         """
         Calculates actions by sampling from action distribution.
 
@@ -425,6 +426,8 @@ class RecurrentDiscreteActor(nn.Module):
              Sequence lengths for data in batch.
         in_hidden : float
             LSTM hidden layer carrying over memory from previous timestep.
+        epsilon : float
+            Used to ensure no zero probability values.
 
         Returns
         -------
@@ -442,9 +445,10 @@ class RecurrentDiscreteActor(nn.Module):
         dist = Categorical(action_probs)
         actions = dist.sample().to(states.device)
 
-        # Calculate log of action probabilities for use with entropy calculations
-        zero_probs = (action_probs == 0.0).float() * 1e-10
-        log_action_probs = torch.log(action_probs + zero_probs)
+        # Have to deal with situation of 0.0 probabilities because we can't do log 0
+        z = action_probs == 0.0
+        z = z.float() * 1e-8
+        log_action_probs = torch.log(action_probs + z)
 
         return actions, action_probs, log_action_probs, out_hidden
 
@@ -502,7 +506,7 @@ class DiscreteActor(nn.Module):
         super().__init__()
         self.fc1 = nn.Linear(np.array(env.observation_space.shape).prod(), 256)
         self.fc2 = nn.Linear(256, 256)
-        self.fc3 = nn.Linear(256, env.action_space.n)
+        self.fc_out = nn.Linear(256, env.action_space.n)
         self.softmax = nn.Softmax(dim=-1)
 
     def forward(self, states):
@@ -521,12 +525,12 @@ class DiscreteActor(nn.Module):
         """
         x = F.relu(self.fc1(states))
         x = F.relu(self.fc2(x))
-        action_logits = self.fc3(x)
+        action_logits = self.fc_out(x)
         action_probs = self.softmax(action_logits)
 
         return action_probs
 
-    def get_actions(self, states):
+    def get_actions(self, states, epsilon=1e-6):
         """
         Calculates actions by sampling from action distribution.
 
@@ -534,6 +538,8 @@ class DiscreteActor(nn.Module):
         ----------
         states : tensor
             States or observations.
+        epsilon : float
+            Used to ensure no zero probability values.
 
         Returns
         -------
@@ -549,9 +555,10 @@ class DiscreteActor(nn.Module):
         dist = Categorical(action_probs)
         actions = dist.sample().to(states.device)
 
-        # Calculate log of action probabilities for use with entropy calculations
-        zero_probs = (action_probs == 0.0).float() * 1e-10
-        log_action_probs = torch.log(action_probs + zero_probs)
+        # Have to deal with situation of 0.0 probabilities because we can't do log 0
+        z = action_probs == 0.0
+        z = z.float() * 1e-8
+        log_action_probs = torch.log(action_probs + z)
 
         return actions, action_probs, log_action_probs
 
@@ -571,8 +578,8 @@ class RecurrentDiscreteCriticDiscreteObs(nn.Module):
         super().__init__()
         self.embedding = nn.Embedding(model_config["input_size"], 256)
         self.lstm1 = nn.LSTM(256, 256)
-        self.fc1 = nn.Linear(256, 256)
-        self.fc2 = nn.Linear(256, model_config["output_size"])
+        self.fc2 = nn.Linear(256, 256)
+        self.fc3 = nn.Linear(256, model_config["output_size"])
 
     def forward(self, states, seq_lengths):
         """Calculate Q-values.
@@ -594,8 +601,8 @@ class RecurrentDiscreteCriticDiscreteObs(nn.Module):
         x, x_unpacked_len = pad_packed_sequence(x)
 
         # Remaining layers
-        x = F.relu(self.fc1(x))
-        q_values = self.fc2(x)
+        x = F.relu(self.fc2(x))
+        q_values = self.fc3(x)
 
         return q_values
 
@@ -615,8 +622,8 @@ class RecurrentDiscreteActorDiscreteObs(nn.Module):
         super().__init__()
         self.embedding = nn.Embedding(model_config["input_size"], 256)
         self.lstm1 = nn.LSTM(256, 256)
-        self.fc1 = nn.Linear(256, 256)
-        self.fc2 = nn.Linear(256, model_config["output_size"])
+        self.fc2 = nn.Linear(256, 256)
+        self.fc_out = nn.Linear(256, model_config["output_size"])
         self.softmax = nn.Softmax(dim=-1)
 
     def forward(self, states, seq_lengths, in_hidden=None):
@@ -643,19 +650,20 @@ class RecurrentDiscreteActorDiscreteObs(nn.Module):
         x, x_unpacked_len = pad_packed_sequence(x)
 
         # Remaining layers
-        x = F.relu(self.fc1(x))
-        action_logits = self.fc2(x)
+        x = F.relu(self.fc2(x))
+        action_logits = self.fc_out(x)
         action_probs = self.softmax(action_logits)
 
         return action_probs, out_hidden
 
-    def get_actions(self, states, seq_lengths, in_hidden=None):
+    def get_actions(self, states, seq_lengths, in_hidden=None, epsilon=1e-8):
         """Calculates actions.
 
         Args:
             states: States or observations.
             seq_lengths: Sequence lengths for data in batch.
             in_hidden: LSTM hidden layer data.
+            epsilon: Used to ensure no zero probability values.
 
         Returns:
             Returns a tuple (actions, action_probs, log_action_probs,
@@ -670,9 +678,11 @@ class RecurrentDiscreteActorDiscreteObs(nn.Module):
         dist = Categorical(action_probs)
         actions = dist.sample().to(states.device)
 
-        # Calculate log of action probabilities for use with entropy calculations
-        zero_probs = (action_probs == 0.0).float() * 1e-10
-        log_action_probs = torch.log(action_probs + zero_probs)
+        # Have to deal with situation of 0.0 probabilities because we can't do
+        # log 0
+        z = action_probs == 0.0
+        z = z.float() * epsilon
+        log_action_probs = torch.log(action_probs + z)
 
         return actions, action_probs, log_action_probs, out_hidden
 
@@ -691,8 +701,8 @@ class DiscreteCriticDiscreteObs(nn.Module):
         """
         super().__init__()
         self.embedding = nn.Embedding(model_config["input_size"], 256)
-        self.fc1 = nn.Linear(256, 256)
-        self.fc2 = nn.Linear(256, model_config["output_size"])
+        self.fc2 = nn.Linear(256, 256)
+        self.fc3 = nn.Linear(256, model_config["output_size"])
 
     def forward(self, states):
         """Calculate Q-values.
@@ -704,8 +714,8 @@ class DiscreteCriticDiscreteObs(nn.Module):
             Q-values for actions.
         """
         x = self.embedding(states)
-        x = F.relu(self.fc1(x))
-        q_values = self.fc2(x)
+        x = F.relu(self.fc2(x))
+        q_values = self.fc3(x)
 
         return q_values
 
@@ -722,8 +732,8 @@ class DiscreteActorDiscreteObs(nn.Module):
         """
         super().__init__()
         self.embedding = nn.Embedding(model_config["input_size"], 256)
-        self.fc1 = nn.Linear(256, 256)
-        self.fc2 = nn.Linear(256, model_config["output_size"])
+        self.fc2 = nn.Linear(256, 256)
+        self.fc_out = nn.Linear(256, model_config["output_size"])
         self.softmax = nn.Softmax(dim=-1)
 
     def forward(self, states):
@@ -736,17 +746,18 @@ class DiscreteActorDiscreteObs(nn.Module):
             Action probabilities.
         """
         x = self.embedding(states)
-        x = F.relu(self.fc1(x))
-        action_logits = self.fc2(x)
+        x = F.relu(self.fc2(x))
+        action_logits = self.fc_out(x)
         action_probs = self.softmax(action_logits)
 
         return action_probs
 
-    def get_actions(self, states):
+    def get_actions(self, states, epsilon=1e-8):
         """Generates actions.
 
         Args:
             states: States or observations.
+            epsilon: Used to ensure no zero probability values.
 
         Returns:
             Returns a tuple (actions, action_probs, log_action_probs), where
@@ -759,9 +770,11 @@ class DiscreteActorDiscreteObs(nn.Module):
         dist = Categorical(action_probs)
         actions = dist.sample().to(states.device)
 
-        # Calculate log of action probabilities for use with entropy calculations
-        zero_probs = (action_probs == 0.0).float() * 1e-10
-        log_action_probs = torch.log(action_probs + zero_probs)
+        # Have to deal with situation of 0.0 probabilities because we can't do
+        # log 0
+        z = action_probs == 0.0
+        z = z.float() * epsilon
+        log_action_probs = torch.log(action_probs + z)
 
         return actions, action_probs, log_action_probs
 
