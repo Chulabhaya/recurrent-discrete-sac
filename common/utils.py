@@ -1,25 +1,23 @@
 import os
 import random
 
+import gym_gridverse
 import gymnasium as gym
 import gymnasium_pomdps
 import numpy as np
 import torch
-
-import gym_gridverse
 from gym_gridverse.envs.yaml.factory import factory_env_from_yaml
-from gym_gridverse.gym import outer_env_factory, GymEnvironment
+from gym_gridverse.gym import GymEnvironment, GymStateWrapper
+from gym_gridverse.outer_env import OuterEnv
 from gym_gridverse.representations.observation_representations import (
     make_observation_representation,
 )
 from gym_gridverse.representations.state_representations import (
     make_state_representation,
 )
-from gym_gridverse.outer_env import OuterEnv
-from gym_gridverse.gym import GymStateWrapper
 
 
-def make_env_gv(env_id, seed, max_episode_len=None):
+def make_gridverse_env(env_id, seed, max_episode_len=None, mdp=False):
     """
     Generate environment with seeding/wrapping.
 
@@ -46,9 +44,13 @@ def make_env_gv(env_id, seed, max_episode_len=None):
         state_representation=state_representation,
         observation_representation=observation_representation,
     )
-    env = gym.make(
-        "GymV21Environment-v0", env=GymStateWrapper(GymEnvironment(outer_env))
-    )
+    if mdp:
+        env = gym.make(
+            "GymV21Environment-v0", env=GymStateWrapper(GymEnvironment(outer_env))
+        )
+    else:
+        env = gym.make("GymV21Environment-v0", env=GymEnvironment(outer_env))
+
     if max_episode_len is not None:
         env = gym.wrappers.TimeLimit(env, max_episode_steps=max_episode_len)
     env = gym.wrappers.RecordEpisodeStatistics(env)

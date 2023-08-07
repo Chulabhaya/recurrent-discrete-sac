@@ -1,10 +1,9 @@
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import numpy as np
-from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
 from torch.distributions import Categorical
-
+from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
 
 LOG_STD_MAX = 2
 LOG_STD_MIN = -5
@@ -375,7 +374,7 @@ class RecurrentDiscreteActor(nn.Module):
         self.fc1 = nn.Linear(np.array(env.observation_space.shape).prod(), 256)
         self.lstm1 = nn.LSTM(256, 256)
         self.fc2 = nn.Linear(256, 256)
-        self.fc_out = nn.Linear(256, env.action_space.n)
+        self.fc3 = nn.Linear(256, env.action_space.n)
         self.softmax = nn.Softmax(dim=-1)
 
     def forward(self, states, seq_lengths, in_hidden=None):
@@ -409,12 +408,12 @@ class RecurrentDiscreteActor(nn.Module):
 
         # Remaining layers
         x = F.relu(self.fc2(x))
-        action_logits = self.fc_out(x)
+        action_logits = self.fc3(x)
         action_probs = self.softmax(action_logits)
 
         return action_probs, out_hidden
 
-    def get_actions(self, states, seq_lengths, in_hidden=None, epsilon=1e-6):
+    def get_actions(self, states, seq_lengths, in_hidden=None):
         """
         Calculates actions by sampling from action distribution.
 
@@ -426,8 +425,6 @@ class RecurrentDiscreteActor(nn.Module):
              Sequence lengths for data in batch.
         in_hidden : float
             LSTM hidden layer carrying over memory from previous timestep.
-        epsilon : float
-            Used to ensure no zero probability values.
 
         Returns
         -------
@@ -445,10 +442,9 @@ class RecurrentDiscreteActor(nn.Module):
         dist = Categorical(action_probs)
         actions = dist.sample().to(states.device)
 
-        # Have to deal with situation of 0.0 probabilities because we can't do log 0
-        z = action_probs == 0.0
-        z = z.float() * 1e-8
-        log_action_probs = torch.log(action_probs + z)
+        # Calculate log of action probabilities for use with entropy calculations
+        zero_probs = (action_probs == 0.0).float() * 1e-10
+        log_action_probs = torch.log(action_probs + zero_probs)
 
         return actions, action_probs, log_action_probs, out_hidden
 
@@ -506,7 +502,7 @@ class DiscreteActor(nn.Module):
         super().__init__()
         self.fc1 = nn.Linear(np.array(env.observation_space.shape).prod(), 256)
         self.fc2 = nn.Linear(256, 256)
-        self.fc_out = nn.Linear(256, env.action_space.n)
+        self.fc3 = nn.Linear(256, env.action_space.n)
         self.softmax = nn.Softmax(dim=-1)
 
     def forward(self, states):
@@ -525,12 +521,12 @@ class DiscreteActor(nn.Module):
         """
         x = F.relu(self.fc1(states))
         x = F.relu(self.fc2(x))
-        action_logits = self.fc_out(x)
+        action_logits = self.fc3(x)
         action_probs = self.softmax(action_logits)
 
         return action_probs
 
-    def get_actions(self, states, epsilon=1e-6):
+    def get_actions(self, states):
         """
         Calculates actions by sampling from action distribution.
 
@@ -538,8 +534,6 @@ class DiscreteActor(nn.Module):
         ----------
         states : tensor
             States or observations.
-        epsilon : float
-            Used to ensure no zero probability values.
 
         Returns
         -------
@@ -555,10 +549,9 @@ class DiscreteActor(nn.Module):
         dist = Categorical(action_probs)
         actions = dist.sample().to(states.device)
 
-        # Have to deal with situation of 0.0 probabilities because we can't do log 0
-        z = action_probs == 0.0
-        z = z.float() * 1e-8
-        log_action_probs = torch.log(action_probs + z)
+        # Calculate log of action probabilities for use with entropy calculations
+        zero_probs = (action_probs == 0.0).float() * 1e-10
+        log_action_probs = torch.log(action_probs + zero_probs)
 
         return actions, action_probs, log_action_probs
 
@@ -578,8 +571,8 @@ class RecurrentDiscreteCriticDiscreteObs(nn.Module):
         super().__init__()
         self.embedding = nn.Embedding(model_config["input_size"], 256)
         self.lstm1 = nn.LSTM(256, 256)
-        self.fc2 = nn.Linear(256, 256)
-        self.fc3 = nn.Linear(256, model_config["output_size"])
+        self.fc1 = nn.Linear(256, 256)
+        self.fc2 = nn.Linear(256, model_config["output_size"])
 
     def forward(self, states, seq_lengths):
         """Calculate Q-values.
@@ -601,8 +594,8 @@ class RecurrentDiscreteCriticDiscreteObs(nn.Module):
         x, x_unpacked_len = pad_packed_sequence(x)
 
         # Remaining layers
-        x = F.relu(self.fc2(x))
-        q_values = self.fc3(x)
+        x = F.relu(self.fc1(x))
+        q_values = self.fc2(x)
 
         return q_values
 
@@ -622,8 +615,8 @@ class RecurrentDiscreteActorDiscreteObs(nn.Module):
         super().__init__()
         self.embedding = nn.Embedding(model_config["input_size"], 256)
         self.lstm1 = nn.LSTM(256, 256)
-        self.fc2 = nn.Linear(256, 256)
-        self.fc_out = nn.Linear(256, model_config["output_size"])
+        self.fc1 = nn.Linear(256, 256)
+        self.fc2 = nn.Linear(256, model_config["output_size"])
         self.softmax = nn.Softmax(dim=-1)
 
     def forward(self, states, seq_lengths, in_hidden=None):
@@ -650,20 +643,19 @@ class RecurrentDiscreteActorDiscreteObs(nn.Module):
         x, x_unpacked_len = pad_packed_sequence(x)
 
         # Remaining layers
-        x = F.relu(self.fc2(x))
-        action_logits = self.fc_out(x)
+        x = F.relu(self.fc1(x))
+        action_logits = self.fc2(x)
         action_probs = self.softmax(action_logits)
 
         return action_probs, out_hidden
 
-    def get_actions(self, states, seq_lengths, in_hidden=None, epsilon=1e-8):
+    def get_actions(self, states, seq_lengths, in_hidden=None):
         """Calculates actions.
 
         Args:
             states: States or observations.
             seq_lengths: Sequence lengths for data in batch.
             in_hidden: LSTM hidden layer data.
-            epsilon: Used to ensure no zero probability values.
 
         Returns:
             Returns a tuple (actions, action_probs, log_action_probs,
@@ -678,11 +670,9 @@ class RecurrentDiscreteActorDiscreteObs(nn.Module):
         dist = Categorical(action_probs)
         actions = dist.sample().to(states.device)
 
-        # Have to deal with situation of 0.0 probabilities because we can't do
-        # log 0
-        z = action_probs == 0.0
-        z = z.float() * epsilon
-        log_action_probs = torch.log(action_probs + z)
+        # Calculate log of action probabilities for use with entropy calculations
+        zero_probs = (action_probs == 0.0).float() * 1e-10
+        log_action_probs = torch.log(action_probs + zero_probs)
 
         return actions, action_probs, log_action_probs, out_hidden
 
@@ -701,8 +691,8 @@ class DiscreteCriticDiscreteObs(nn.Module):
         """
         super().__init__()
         self.embedding = nn.Embedding(model_config["input_size"], 256)
-        self.fc2 = nn.Linear(256, 256)
-        self.fc3 = nn.Linear(256, model_config["output_size"])
+        self.fc1 = nn.Linear(256, 256)
+        self.fc2 = nn.Linear(256, model_config["output_size"])
 
     def forward(self, states):
         """Calculate Q-values.
@@ -714,8 +704,8 @@ class DiscreteCriticDiscreteObs(nn.Module):
             Q-values for actions.
         """
         x = self.embedding(states)
-        x = F.relu(self.fc2(x))
-        q_values = self.fc3(x)
+        x = F.relu(self.fc1(x))
+        q_values = self.fc2(x)
 
         return q_values
 
@@ -732,8 +722,8 @@ class DiscreteActorDiscreteObs(nn.Module):
         """
         super().__init__()
         self.embedding = nn.Embedding(model_config["input_size"], 256)
-        self.fc2 = nn.Linear(256, 256)
-        self.fc_out = nn.Linear(256, model_config["output_size"])
+        self.fc1 = nn.Linear(256, 256)
+        self.fc2 = nn.Linear(256, model_config["output_size"])
         self.softmax = nn.Softmax(dim=-1)
 
     def forward(self, states):
@@ -746,18 +736,17 @@ class DiscreteActorDiscreteObs(nn.Module):
             Action probabilities.
         """
         x = self.embedding(states)
-        x = F.relu(self.fc2(x))
-        action_logits = self.fc_out(x)
+        x = F.relu(self.fc1(x))
+        action_logits = self.fc2(x)
         action_probs = self.softmax(action_logits)
 
         return action_probs
 
-    def get_actions(self, states, epsilon=1e-8):
+    def get_actions(self, states):
         """Generates actions.
 
         Args:
             states: States or observations.
-            epsilon: Used to ensure no zero probability values.
 
         Returns:
             Returns a tuple (actions, action_probs, log_action_probs), where
@@ -770,195 +759,9 @@ class DiscreteActorDiscreteObs(nn.Module):
         dist = Categorical(action_probs)
         actions = dist.sample().to(states.device)
 
-        # Have to deal with situation of 0.0 probabilities because we can't do
-        # log 0
-        z = action_probs == 0.0
-        z = z.float() * epsilon
-        log_action_probs = torch.log(action_probs + z)
-
-        return actions, action_probs, log_action_probs
-
-
-class DiscreteCriticGridVerseObs2(nn.Module):
-    """Discrete soft Q-network model for discrete SAC with discrete actions
-    and GridVerse observations."""
-
-    def __init__(self, env):
-        """Initialize the critic model.
-
-        Parameters
-        ----------
-        env : gym environment
-            Gym environment being used for learning.
-        """
-        super().__init__()
-
-        # Calculate input/output dimensions
-        self._grid_emb_in_dim = 32
-        self._grid_emb_out_dim = 4
-        self._grid_shape = env.observation_space.spaces["grid"].shape
-        self._agent_id_grid_emb_in_dim = 2
-        self._agent_id_grid_emb_out_dim = 4
-        self._agent_id_grid_shape = env.observation_space.spaces["agent_id_grid"].shape
-        self._agent_in_shape = env.observation_space.spaces["agent"].shape
-        self._fc1_in_dim = (
-            np.prod(self._grid_shape) * self._grid_emb_out_dim
-            + np.prod(self._agent_id_grid_shape) * self._agent_id_grid_emb_out_dim
-        )
-        self._fc1_out_dim = 256
-        self._post_processing_in_dim = self._fc1_out_dim + self._agent_in_shape[0]
-
-        # Process image and direction
-        self.grid_embedding = nn.Embedding(
-            self._grid_emb_in_dim, self._grid_emb_out_dim
-        )
-        self.agent_id_grid_embedding = nn.Embedding(
-            self._agent_id_grid_emb_in_dim, self._agent_id_grid_emb_out_dim
-        )
-        self.fc1 = nn.Linear(self._fc1_in_dim, self._fc1_out_dim)
-
-        # Remainder of network
-        self.fc2 = nn.Linear(self._post_processing_in_dim, 256)
-        self.fc3 = nn.Linear(256, env.action_space.n)
-
-    def forward(self, states):
-        """
-        Calculates Q-values for each state-action.
-
-        Parameters
-        ----------
-        states : tensor
-            States or observations.
-
-        Returns
-        -------
-        q_values : tensor
-            Q-values for all actions possible with input state.
-        """
-        # Generate embeddings
-        grid_emb = self.grid_embedding(states["grid"])
-        grid_emb = torch.flatten(grid_emb, start_dim=1)
-        agent_id_grid_emb = self.agent_id_grid_embedding(states["agent_id_grid"])
-        agent_id_grid_emb = torch.flatten(agent_id_grid_emb, start_dim=1)
-        unified_grid_emb = torch.cat((grid_emb, agent_id_grid_emb), dim=1)
-        unified_grid_emb = F.relu(self.fc1(unified_grid_emb))
-        agent_emb = states["agent"]
-
-        # Process embeddings with FC layers
-        x = torch.cat((unified_grid_emb, agent_emb), dim=1)
-        x = F.relu(self.fc2(x))
-
-        # Rest of the network
-        q_values = self.fc3(x)
-
-        return q_values
-
-
-class DiscreteActorGridVerseObs2(nn.Module):
-    """Discrete actor model for discrete SAC with discrete actions
-    and GridVerse observations."""
-
-    def __init__(self, env):
-        """Initialize the actor model.
-
-        Parameters
-        ----------
-        env : gym environment
-            Gym environment being used for learning.
-        """
-        super().__init__()
-
-        # Calculate input/output dimensions
-        self._grid_emb_in_dim = 32
-        self._grid_emb_out_dim = 4
-        self._grid_shape = env.observation_space.spaces["grid"].shape
-        self._agent_id_grid_emb_in_dim = 2
-        self._agent_id_grid_emb_out_dim = 4
-        self._agent_id_grid_shape = env.observation_space.spaces["agent_id_grid"].shape
-        self._agent_in_shape = env.observation_space.spaces["agent"].shape
-        self._fc1_in_dim = (
-            np.prod(self._grid_shape) * self._grid_emb_out_dim
-            + np.prod(self._agent_id_grid_shape) * self._agent_id_grid_emb_out_dim
-        )
-        self._fc1_out_dim = 256
-        self._post_processing_in_dim = self._fc1_out_dim + self._agent_in_shape[0]
-
-        # Process image and direction
-        self.grid_embedding = nn.Embedding(
-            self._grid_emb_in_dim, self._grid_emb_out_dim
-        )
-        self.agent_id_grid_embedding = nn.Embedding(
-            self._agent_id_grid_emb_in_dim, self._agent_id_grid_emb_out_dim
-        )
-        self.fc1 = nn.Linear(self._fc1_in_dim, self._fc1_out_dim)
-
-        # Remainder of network
-        self.fc2 = nn.Linear(self._post_processing_in_dim, 256)
-        self.fc3 = nn.Linear(256, env.action_space.n)
-        self.softmax = nn.Softmax(dim=-1)
-
-    def forward(self, states):
-        """
-        Calculates probabilities for taking each action given a state.
-
-        Parameters
-        ----------
-        states : tensor
-            States or observations.
-
-        Returns
-        -------
-        action_probs : tensor
-            Probabilities for all actions possible with input state.
-        """
-        # Generate embeddings
-        grid_emb = self.grid_embedding(states["grid"])
-        grid_emb = torch.flatten(grid_emb, start_dim=1)
-        agent_id_grid_emb = self.agent_id_grid_embedding(states["agent_id_grid"])
-        agent_id_grid_emb = torch.flatten(agent_id_grid_emb, start_dim=1)
-        unified_grid_emb = torch.cat((grid_emb, agent_id_grid_emb), dim=1)
-        unified_grid_emb = F.relu(self.fc1(unified_grid_emb))
-        agent_emb = states["agent"]
-
-        # Process embeddings with FC layers
-        x = torch.cat((unified_grid_emb, agent_emb), dim=1)
-        x = F.relu(self.fc2(x))
-
-        # Rest of the network
-        action_logits = self.fc3(x)
-        action_probs = self.softmax(action_logits)
-
-        return action_probs
-
-    def get_actions(self, states, epsilon=1e-6):
-        """
-        Calculates actions by sampling from action distribution.
-
-        Parameters
-        ----------
-        states : tensor
-            States or observations.
-        epsilon : float
-            Used to ensure no zero probability values.
-
-        Returns
-        -------
-        actions : tensor
-            Sampled actions from action distributions.
-        action_probs : tensor
-            Probabilities for all actions possible with input state.
-        log_action_probs : tensor
-            Logs of action probabilities, used for entropy.
-        """
-        action_probs = self.forward(states)
-
-        dist = Categorical(action_probs)
-        actions = dist.sample().to(states["grid"].device)
-
-        # Have to deal with situation of 0.0 probabilities because we can't do log 0
-        z = action_probs == 0.0
-        z = z.float() * 1e-8
-        log_action_probs = torch.log(action_probs + z)
+        # Calculate log of action probabilities for use with entropy calculations
+        zero_probs = (action_probs == 0.0).float() * 1e-10
+        log_action_probs = torch.log(action_probs + zero_probs)
 
         return actions, action_probs, log_action_probs
 
@@ -977,34 +780,15 @@ class DiscreteCriticGridVerseObs(nn.Module):
         """
         super().__init__()
 
-        # Calculate input/output dimensions
-        self._grid_emb_in_dim = 32
-        self._grid_emb_out_dim = 4
-        self._grid_shape = env.observation_space.spaces["grid"].shape
-        self._agent_id_grid_emb_in_dim = 2
-        self._agent_id_grid_emb_out_dim = 4
-        self._agent_id_grid_shape = env.observation_space.spaces["agent_id_grid"].shape
-        self._agent_in_shape = env.observation_space.spaces["agent"].shape
-        self._fc1_in_dim = (
-            np.prod(self._grid_shape) * self._grid_emb_out_dim
-            + np.prod(self._agent_id_grid_shape) * self._agent_id_grid_emb_out_dim
-        )
-        self._fc1_out_dim = 256
-        self._post_processing_in_dim = self._fc1_out_dim + self._agent_in_shape[0]
-
         # Process image and direction
-        self.grid_embedding = nn.Embedding(
-            self._grid_emb_in_dim, self._grid_emb_out_dim
-        )
-        self.agent_id_grid_embedding = nn.Embedding(
-            self._agent_id_grid_emb_in_dim, self._agent_id_grid_emb_out_dim
-        )
+        self.grid_embedding = nn.Embedding(32, 4)
+        self.agent_id_grid_embedding = nn.Embedding(2, 4)
         self.conv1 = nn.Conv2d(in_channels=16, out_channels=32, kernel_size=2, stride=2)
         self.conv2 = nn.Conv2d(in_channels=32, out_channels=64, kernel_size=2, stride=1)
 
         # Remainder of network
-        self.fc2 = nn.Linear(262, 128)
-        self.fc3 = nn.Linear(128, env.action_space.n)
+        self.fc1 = nn.Linear(262, 128)
+        self.fc2 = nn.Linear(128, env.action_space.n)
 
     def forward(self, states):
         """
@@ -1024,7 +808,9 @@ class DiscreteCriticGridVerseObs(nn.Module):
         grid_emb = self.grid_embedding(states["grid"])
         grid_emb = torch.flatten(grid_emb, start_dim=3)
         agent_id_grid_emb = self.agent_id_grid_embedding(states["agent_id_grid"])
-        unified_grid_emb = torch.cat((grid_emb, agent_id_grid_emb), dim=3).permute(0, 3, 1, 2)
+        unified_grid_emb = torch.cat((grid_emb, agent_id_grid_emb), dim=3).permute(
+            0, 3, 1, 2
+        )
         unified_grid_emb = F.relu(self.conv1(unified_grid_emb))
         unified_grid_emb = F.relu(self.conv2(unified_grid_emb))
         unified_grid_emb = torch.flatten(unified_grid_emb, start_dim=1)
@@ -1032,10 +818,10 @@ class DiscreteCriticGridVerseObs(nn.Module):
 
         # Process embeddings with FC layers
         x = torch.cat((unified_grid_emb, agent_emb), dim=1)
-        x = F.relu(self.fc2(x))
+        x = F.relu(self.fc1(x))
 
         # Rest of the network
-        q_values = self.fc3(x)
+        q_values = self.fc2(x)
 
         return q_values
 
@@ -1054,34 +840,15 @@ class DiscreteActorGridVerseObs(nn.Module):
         """
         super().__init__()
 
-        # Calculate input/output dimensions
-        self._grid_emb_in_dim = 32
-        self._grid_emb_out_dim = 4
-        self._grid_shape = env.observation_space.spaces["grid"].shape
-        self._agent_id_grid_emb_in_dim = 2
-        self._agent_id_grid_emb_out_dim = 4
-        self._agent_id_grid_shape = env.observation_space.spaces["agent_id_grid"].shape
-        self._agent_in_shape = env.observation_space.spaces["agent"].shape
-        self._fc1_in_dim = (
-            np.prod(self._grid_shape) * self._grid_emb_out_dim
-            + np.prod(self._agent_id_grid_shape) * self._agent_id_grid_emb_out_dim
-        )
-        self._fc1_out_dim = 256
-        self._post_processing_in_dim = self._fc1_out_dim + self._agent_in_shape[0]
-
         # Process image and direction
-        self.grid_embedding = nn.Embedding(
-            self._grid_emb_in_dim, self._grid_emb_out_dim
-        )
-        self.agent_id_grid_embedding = nn.Embedding(
-            self._agent_id_grid_emb_in_dim, self._agent_id_grid_emb_out_dim
-        )
+        self.grid_embedding = nn.Embedding(32, 4)
+        self.agent_id_grid_embedding = nn.Embedding(2, 4)
         self.conv1 = nn.Conv2d(in_channels=16, out_channels=32, kernel_size=2, stride=2)
         self.conv2 = nn.Conv2d(in_channels=32, out_channels=64, kernel_size=2, stride=1)
 
         # Remainder of network
-        self.fc2 = nn.Linear(262, 128)
-        self.fc3 = nn.Linear(128, env.action_space.n)
+        self.fc1 = nn.Linear(262, 128)
+        self.fc2 = nn.Linear(128, env.action_space.n)
         self.softmax = nn.Softmax(dim=-1)
 
     def forward(self, states):
@@ -1102,7 +869,9 @@ class DiscreteActorGridVerseObs(nn.Module):
         grid_emb = self.grid_embedding(states["grid"])
         grid_emb = torch.flatten(grid_emb, start_dim=3)
         agent_id_grid_emb = self.agent_id_grid_embedding(states["agent_id_grid"])
-        unified_grid_emb = torch.cat((grid_emb, agent_id_grid_emb), dim=3).permute(0, 3, 1, 2)
+        unified_grid_emb = torch.cat((grid_emb, agent_id_grid_emb), dim=3).permute(
+            0, 3, 1, 2
+        )
         unified_grid_emb = F.relu(self.conv1(unified_grid_emb))
         unified_grid_emb = F.relu(self.conv2(unified_grid_emb))
         unified_grid_emb = torch.flatten(unified_grid_emb, start_dim=1)
@@ -1110,15 +879,15 @@ class DiscreteActorGridVerseObs(nn.Module):
 
         # Process embeddings with FC layers
         x = torch.cat((unified_grid_emb, agent_emb), dim=1)
-        x = F.relu(self.fc2(x))
+        x = F.relu(self.fc1(x))
 
         # Rest of the network
-        action_logits = self.fc3(x)
+        action_logits = self.fc2(x)
         action_probs = self.softmax(action_logits)
 
         return action_probs
 
-    def get_actions(self, states, epsilon=1e-6):
+    def get_actions(self, states):
         """
         Calculates actions by sampling from action distribution.
 
@@ -1126,8 +895,6 @@ class DiscreteActorGridVerseObs(nn.Module):
         ----------
         states : tensor
             States or observations.
-        epsilon : float
-            Used to ensure no zero probability values.
 
         Returns
         -------
@@ -1143,9 +910,213 @@ class DiscreteActorGridVerseObs(nn.Module):
         dist = Categorical(action_probs)
         actions = dist.sample().to(states["grid"].device)
 
-        # Have to deal with situation of 0.0 probabilities because we can't do log 0
-        z = action_probs == 0.0
-        z = z.float() * 1e-8
-        log_action_probs = torch.log(action_probs + z)
+        # Calculate log of action probabilities for use with entropy calculations
+        zero_probs = (action_probs == 0.0).float() * 1e-10
+        log_action_probs = torch.log(action_probs + zero_probs)
 
         return actions, action_probs, log_action_probs
+
+
+class RecurrentDiscreteCriticGridVerseObs(nn.Module):
+    """Recurrent discrete soft Q-network model for discrete SAC for POMDPs with discrete actions
+    and continuous observations."""
+
+    def __init__(self, env):
+        """Initialize the critic model.
+
+        Parameters
+        ----------
+        env : gym environment
+            Gym environment being used for learning.
+        """
+        super().__init__()
+
+        # Process image and direction
+        self.grid_embedding = nn.Embedding(32, 4)
+        self.agent_id_grid_embedding = nn.Embedding(2, 4)
+        self.conv1 = nn.Conv2d(in_channels=16, out_channels=32, kernel_size=2, stride=2)
+        self.conv2 = nn.Conv2d(in_channels=32, out_channels=64, kernel_size=2, stride=1)
+
+        # Process with LSTM
+        self.lstm1 = nn.LSTM(256, 128)
+
+        # Remainder of network
+        self.fc1 = nn.Linear(128, 128)
+        self.fc2 = nn.Linear(128, env.action_space.n)
+
+    def forward(self, states, seq_lengths):
+        """
+        Calculates Q-values for each state-action.
+
+        Parameters
+        ----------
+        states : tensor
+            States or observations.
+        seq_lengths : tensor
+             Sequence lengths for data in batch.
+
+        Returns
+        -------
+        q_values : tensor
+            Q-values for all actions possible with input state.
+        """
+        # Generate embeddings
+        grid_emb = self.grid_embedding(states["grid"])
+        grid_emb = torch.flatten(grid_emb, start_dim=4)
+        agent_id_grid_emb = self.agent_id_grid_embedding(states["agent_id_grid"])
+        unified_grid_emb = torch.cat((grid_emb, agent_id_grid_emb), dim=4).permute(
+            0, 1, 4, 2, 3
+        )
+        time_dim = unified_grid_emb.shape[0]
+        batch_dim = unified_grid_emb.shape[1]
+        unified_grid_emb = unified_grid_emb.view(
+            -1,
+            unified_grid_emb.shape[2],
+            unified_grid_emb.shape[3],
+            unified_grid_emb.shape[4],
+        )
+        unified_grid_emb = F.relu(self.conv1(unified_grid_emb))
+        unified_grid_emb = F.relu(self.conv2(unified_grid_emb))
+        unified_grid_emb = unified_grid_emb.view(
+            time_dim,
+            batch_dim,
+            unified_grid_emb.shape[1],
+            unified_grid_emb.shape[2],
+            unified_grid_emb.shape[3],
+        )
+        x = torch.flatten(unified_grid_emb, start_dim=2)
+
+        # Padded LSTM layer
+        x = pack_padded_sequence(x, seq_lengths, enforce_sorted=False)
+        self.lstm1.flatten_parameters()
+        x, _ = self.lstm1(x)
+        x, x_unpacked_len = pad_packed_sequence(x)
+
+        # Remaining layers
+        x = F.relu(self.fc1(x))
+        q_values = self.fc2(x)
+
+        return q_values
+
+
+class RecurrentDiscreteActorGridVerseObs(nn.Module):
+    """Recurrent discrete soft actor model for discrete SAC for POMDPs with discrete actions
+    and continuous observations."""
+
+    def __init__(self, env):
+        """Initialize the actor model.
+
+        Parameters
+        ----------
+        env : gym environment
+            Gym environment being used for learning.
+        """
+        super().__init__()
+
+        # Process image and direction
+        self.grid_embedding = nn.Embedding(32, 4)
+        self.agent_id_grid_embedding = nn.Embedding(2, 4)
+        self.conv1 = nn.Conv2d(in_channels=16, out_channels=32, kernel_size=2, stride=2)
+        self.conv2 = nn.Conv2d(in_channels=32, out_channels=64, kernel_size=2, stride=1)
+
+        # Process with LSTM
+        self.lstm1 = nn.LSTM(256, 128)
+
+        # Remainder of network
+        self.fc1 = nn.Linear(128, 128)
+        self.fc2 = nn.Linear(128, env.action_space.n)
+        self.softmax = nn.Softmax(dim=-1)
+
+    def forward(self, states, seq_lengths, in_hidden=None):
+        """
+        Calculates probabilities for taking each action given a state.
+
+        Parameters
+        ----------
+        states : tensor
+            States or observations.
+        seq_lengths : tensor
+             Sequence lengths for data in batch.
+        in_hidden : float
+            LSTM hidden layer carrying over memory from previous timestep.
+
+        Returns
+        -------
+        action_probs : tensor
+            Probabilities for all actions possible with input state.
+        out_hidden : tensor
+            LSTM hidden layer for preserving memory for next timestep.
+        """
+        # Generate embeddings
+        grid_emb = self.grid_embedding(states["grid"])
+        grid_emb = torch.flatten(grid_emb, start_dim=4)
+        agent_id_grid_emb = self.agent_id_grid_embedding(states["agent_id_grid"])
+        unified_grid_emb = torch.cat((grid_emb, agent_id_grid_emb), dim=4).permute(
+            0, 1, 4, 2, 3
+        )
+        time_dim = unified_grid_emb.shape[0]
+        batch_dim = unified_grid_emb.shape[1]
+        unified_grid_emb = unified_grid_emb.view(
+            -1,
+            unified_grid_emb.shape[2],
+            unified_grid_emb.shape[3],
+            unified_grid_emb.shape[4],
+        )
+        unified_grid_emb = F.relu(self.conv1(unified_grid_emb))
+        unified_grid_emb = F.relu(self.conv2(unified_grid_emb))
+        unified_grid_emb = unified_grid_emb.view(
+            time_dim,
+            batch_dim,
+            unified_grid_emb.shape[1],
+            unified_grid_emb.shape[2],
+            unified_grid_emb.shape[3],
+        )
+        x = torch.flatten(unified_grid_emb, start_dim=2)
+
+        # Padded LSTM layer
+        x = pack_padded_sequence(x, seq_lengths, enforce_sorted=False)
+        self.lstm1.flatten_parameters()
+        x, out_hidden = self.lstm1(x, in_hidden)
+        x, x_unpacked_len = pad_packed_sequence(x)
+
+        # Remaining layers
+        x = F.relu(self.fc1(x))
+        action_logits = self.fc2(x)
+        action_probs = self.softmax(action_logits)
+
+        return action_probs, out_hidden
+
+    def get_actions(self, states, seq_lengths, in_hidden=None):
+        """
+        Calculates actions by sampling from action distribution.
+
+        Parameters
+        ----------
+        states : tensor
+            States or observations.
+        seq_lengths : tensor
+             Sequence lengths for data in batch.
+        in_hidden : float
+            LSTM hidden layer carrying over memory from previous timestep.
+
+        Returns
+        -------
+        actions : tensor
+            Sampled actions from action distributions.
+        action_probs : tensor
+            Probabilities for all actions possible with input state.
+        log_action_probs : tensor
+            Logs of action probabilities, used for entropy.
+        out_hidden : tensor
+            LSTM hidden layer for preserving memory for next timestep.
+        """
+        action_probs, out_hidden = self.forward(states, seq_lengths, in_hidden)
+
+        dist = Categorical(action_probs)
+        actions = dist.sample().to(states["grid"].device)
+
+        # Calculate log of action probabilities for use with entropy calculations
+        zero_probs = (action_probs == 0.0).float() * 1e-10
+        log_action_probs = torch.log(action_probs + zero_probs)
+
+        return actions, action_probs, log_action_probs, out_hidden

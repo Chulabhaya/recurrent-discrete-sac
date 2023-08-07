@@ -11,9 +11,12 @@ import torch.nn.functional as F
 import torch.optim as optim
 
 import wandb
-from common.models import DiscreteActorGridVerseObs, DiscreteCriticGridVerseObs
+from common.models import (
+    RecurrentDiscreteActorGridVerseObs,
+    RecurrentDiscreteCriticGridVerseObs,
+)
 from common.replay_buffer import GridVerseReplayBuffer as ReplayBuffer
-from common.utils import make_gridverse_env, save, set_seed
+from common.utils import make_gridverse_env, set_seed, save
 
 
 def parse_args():
@@ -47,6 +50,8 @@ def parse_args():
         help="target smoothing coefficient (default: 0.005)")
     parser.add_argument("--batch-size", type=int, default=256,
         help="the batch size of sample from the reply memory")
+    parser.add_argument("--history-length", type=int, default=None,
+        help="maximum sequence length to sample, None means whole episodes are sampled")
     parser.add_argument("--learning-starts", type=int, default=5e3,
         help="timestep to start learning")
     parser.add_argument("--policy-lr", type=float, default=3e-4,
@@ -138,29 +143,23 @@ if __name__ == "__main__":
         args.env_id,
         args.seed,
         max_episode_len=args.maximum_episode_length,
-        mdp=True
     )
     assert isinstance(
         env.action_space, gym.spaces.Discrete
     ), "only discrete action space is supported"
 
     # Initialize models and optimizers
-    actor = DiscreteActorGridVerseObs(env).to(device)
-    qf1 = DiscreteCriticGridVerseObs(env).to(device)
-    qf2 = DiscreteCriticGridVerseObs(env).to(device)
-    qf1_target = DiscreteCriticGridVerseObs(env).to(device)
-    qf2_target = DiscreteCriticGridVerseObs(env).to(device)
+    actor = RecurrentDiscreteActorGridVerseObs(env).to(device)
+    qf1 = RecurrentDiscreteCriticGridVerseObs(env).to(device)
+    qf2 = RecurrentDiscreteCriticGridVerseObs(env).to(device)
+    qf1_target = RecurrentDiscreteCriticGridVerseObs(env).to(device)
+    qf2_target = RecurrentDiscreteCriticGridVerseObs(env).to(device)
     qf1_target.load_state_dict(qf1.state_dict())
     qf2_target.load_state_dict(qf2.state_dict())
     q_optimizer = optim.Adam(
         list(qf1.parameters()) + list(qf2.parameters()), lr=args.q_lr
     )
     actor_optimizer = optim.Adam(list(actor.parameters()), lr=args.policy_lr)
-
-    # Watch gradients
-    wandb.watch(actor, log="all")
-    wandb.watch(qf1, log="all")
-    wandb.watch(qf2, log="all")
 
     # If resuming training, load models and optimizers
     if args.resume:
@@ -177,6 +176,11 @@ if __name__ == "__main__":
         actor_optimizer.load_state_dict(
             checkpoint["optimizer_state_dict"]["actor_optimizer"]
         )
+
+    # Watch gradients
+    wandb.watch(actor, log="all")
+    wandb.watch(qf1, log="all")
+    wandb.watch(qf2, log="all")
 
     # Automatic entropy tuning
     if args.autotune:
@@ -199,9 +203,9 @@ if __name__ == "__main__":
     # Initialize replay buffer
     rb = ReplayBuffer(
         args.buffer_size,
-        episodic=False,
+        episodic=True,
         stateful=False,
-        mdp=True,
+        mdp=False,
         device=device,
     )
     # If resuming training, then load previous replay buffer
@@ -218,6 +222,7 @@ if __name__ == "__main__":
     if args.resume:
         start_global_step = checkpoint["global_step"] + 1
 
+    in_hidden = None
     obs, info = env.reset(seed=args.seed)
     # Set RNG state for env
     if args.resume:
@@ -236,18 +241,23 @@ if __name__ == "__main__":
         if global_step < args.learning_starts:
             action = env.action_space.sample()
         else:
-            action, _, _ = actor.get_actions(
+            seq_lengths = torch.LongTensor([1])
+            action, _, _, out_hidden = actor.get_actions(
                 {
-                    "grid": torch.tensor(obs["grid"]).to(device).unsqueeze(0),
+                    "grid": torch.tensor(obs["grid"])
+                    .to(device)
+                    .unsqueeze(0)
+                    .unsqueeze(0),
                     "agent_id_grid": torch.tensor(obs["agent_id_grid"])
                     .to(device)
-                    .unsqueeze(0),
-                    "agent": torch.tensor(obs["agent"], dtype=torch.float32)
-                    .to(device)
-                    .unsqueeze(0),
-                }
+                    .unsqueeze(0)
+                    .unsqueeze(0)
+                },
+                seq_lengths,
+                in_hidden,
             )
-            action = action.detach().cpu().numpy()[0]
+            action = action.view(-1).detach().cpu().numpy()[0]
+            in_hidden = out_hidden
 
         # Take step in environment
         next_obs, reward, terminated, truncated, info = env.step(action)
@@ -267,24 +277,30 @@ if __name__ == "__main__":
             data_log["misc/episodic_return"] = info["episode"]["r"][0]
             data_log["misc/episodic_length"] = info["episode"]["l"][0]
 
+            in_hidden = None
             obs, info = env.reset()
 
         # ALGO LOGIC: training.
         if global_step > args.learning_starts:
             # sample data from replay buffer
-            observations, actions, next_observations, rewards, terminateds = rb.sample(
-                args.batch_size
-            )
+            (
+                observations,
+                actions,
+                next_observations,
+                rewards,
+                terminateds,
+                seq_lengths,
+            ) = rb.sample(args.batch_size, args.history_length)
             # ---------- update critic ---------- #
             # no grad because target networks are updated separately (pg. 6 of
             # updated SAC paper)
             with torch.no_grad():
-                _, next_state_action_probs, next_state_log_pis = actor.get_actions(
-                    next_observations
+                _, next_state_action_probs, next_state_log_pis, _ = actor.get_actions(
+                    next_observations, seq_lengths
                 )
                 # two Q-value estimates for reducing overestimation bias (pg. 8 of updated SAC paper)
-                qf1_next_target_values = qf1_target(next_observations)
-                qf2_next_target_values = qf2_target(next_observations)
+                qf1_next_target_values = qf1_target(next_observations, seq_lengths)
+                qf2_next_target_values = qf2_target(next_observations, seq_lengths)
                 min_qf_next_target_values = torch.min(
                     qf1_next_target_values, qf2_next_target_values
                 )
@@ -296,14 +312,30 @@ if __name__ == "__main__":
                 next_q_values = rewards + (
                     (1 - terminateds)
                     * args.gamma
-                    * qf_next_target.sum(dim=1).unsqueeze(-1)
+                    * qf_next_target.sum(dim=2).unsqueeze(-1)
                 )
 
             # calculate eq. 5 in updated SAC paper
-            qf1_a_values = qf1(observations).gather(1, actions)
-            qf2_a_values = qf2(observations).gather(1, actions)
-            qf1_loss = F.mse_loss(qf1_a_values, next_q_values)
-            qf2_loss = F.mse_loss(qf2_a_values, next_q_values)
+            qf1_a_values = qf1(observations, seq_lengths).gather(2, actions)
+            qf2_a_values = qf2(observations, seq_lengths).gather(2, actions)
+            q_loss_mask = torch.unsqueeze(
+                torch.arange(torch.max(seq_lengths))[:, None] < seq_lengths[None, :], 2
+            ).to(device)
+            q_loss_mask_nonzero_elements = torch.sum(q_loss_mask).to(device)
+            qf1_loss = (
+                torch.sum(
+                    F.mse_loss(qf1_a_values, next_q_values, reduction="none")
+                    * q_loss_mask
+                )
+                / q_loss_mask_nonzero_elements
+            )
+            qf2_loss = (
+                torch.sum(
+                    F.mse_loss(qf2_a_values, next_q_values, reduction="none")
+                    * q_loss_mask
+                )
+                / q_loss_mask_nonzero_elements
+            )
             qf_loss = qf1_loss + qf2_loss
 
             # calculate eq. 6 in updated SAC paper
@@ -316,24 +348,27 @@ if __name__ == "__main__":
                 for _ in range(
                     args.policy_frequency
                 ):  # compensate for the delay by doing 'actor_update_interval' instead of 1
-                    _, state_action_probs, state_action_log_pis = actor.get_actions(
-                        observations
+                    _, state_action_probs, state_action_log_pis, _ = actor.get_actions(
+                        observations, seq_lengths
                     )
 
                     # no grad because q-networks are updated separately
                     with torch.no_grad():
-                        qf1_pi = qf1(observations)
-                        qf2_pi = qf2(observations)
+                        qf1_pi = qf1(observations, seq_lengths)
+                        qf2_pi = qf2(observations, seq_lengths)
                         min_qf_pi = torch.min(qf1_pi, qf2_pi)
 
                     # calculate eq. 7 in updated SAC paper
+                    actor_loss_mask = torch.repeat_interleave(
+                        q_loss_mask, env.action_space.n, 2
+                    )
+                    actor_loss_mask_nonzero_elements = torch.sum(actor_loss_mask)
+                    actor_loss = state_action_probs * (
+                        (alpha * state_action_log_pis) - min_qf_pi
+                    )
                     actor_loss = (
-                        (
-                            state_action_probs
-                            * ((alpha * state_action_log_pis) - min_qf_pi)
-                        )
-                        .sum(1)
-                        .mean()
+                        torch.sum(actor_loss * actor_loss_mask)
+                        / actor_loss_mask_nonzero_elements
                     )
 
                     # calculate eq. 9 in updated SAC paper
@@ -349,12 +384,16 @@ if __name__ == "__main__":
                                 _,
                                 state_action_probs,
                                 state_action_log_pis,
-                            ) = actor.get_actions(observations)
+                                _,
+                            ) = actor.get_actions(observations, seq_lengths)
                         # calculate eq. 18 in updated SAC paper
                         alpha_loss = state_action_probs * (
                             -log_alpha * (state_action_log_pis + target_entropy)
                         )
-                        alpha_loss = torch.sum(alpha_loss, dim=1).mean()
+                        alpha_loss = (
+                            torch.sum(alpha_loss * actor_loss_mask)
+                            / actor_loss_mask_nonzero_elements
+                        )
 
                         # calculate gradient of eq. 18
                         a_optimizer.zero_grad()
@@ -379,8 +418,12 @@ if __name__ == "__main__":
                     )
 
             if global_step % 100 == 0:
-                data_log["losses/qf1_values"] = qf1_a_values.mean().item()
-                data_log["losses/qf2_values"] = qf2_a_values.mean().item()
+                data_log["losses/qf1_values"] = (
+                    torch.sum(qf1_a_values * q_loss_mask) / q_loss_mask_nonzero_elements
+                ).item()
+                data_log["losses/qf2_values"] = (
+                    torch.sum(qf2_a_values * q_loss_mask) / q_loss_mask_nonzero_elements
+                ).item()
                 data_log["losses/qf1_loss"] = qf1_loss.item()
                 data_log["losses/qf2_loss"] = qf2_loss.item()
                 data_log["losses/qf_loss"] = qf_loss.item()

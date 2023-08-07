@@ -1,6 +1,6 @@
 state_space:
-  objects: [ Wall, Floor, Exit, Telepod ]
-  colors: [ NONE, RED ]
+  objects: [ Wall, Floor, Exit, Beacon ]
+  colors: [ NONE, RED, GREEN, BLUE, YELLOW ]
 
 action_space:
   - MOVE_FORWARD
@@ -11,28 +11,22 @@ action_space:
   - TURN_RIGHT
 
 observation_space:
-  objects: [ Wall, Floor, Exit, Telepod ]
-  colors: [ NONE, RED ]
+  objects: [ Wall, Floor, Exit, Beacon ]
+  colors: [ NONE, RED, GREEN, BLUE, YELLOW ]
 
 reset_function:
-  name: teleport
+  name: memory
   shape: [ 7, 7 ]
-  random_agent: True
+  colors: [ RED, GREEN, BLUE, YELLOW ]
 
 transition_functions:
   - name: move_agent
   - name: turn_agent
-  - name: teleport
 
 reward_functions:
-  - name: reach_exit
-    reward_on: 5.0
-    reward_off: 0.0
-  - name: getting_closer
-    distance_function: manhattan
-    object_type: Exit
-    reward_closer: 0.2
-    reward_further: -0.2
+  - name: reach_exit_memory
+    reward_good: 5.0
+    reward_bad: -5.0
   - name: living_reward
     reward: -0.05
 
