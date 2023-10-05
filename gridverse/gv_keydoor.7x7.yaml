@@ -37,7 +37,7 @@ reward_functions:
 
 observation_function:
   name: partially_occluded
-  area: [ [ -6, 0 ], [-3, 3 ] ]
+  area: [ [ -1, 0 ], [-1, 1 ] ]
 
 terminating_function:
   name: reach_exit

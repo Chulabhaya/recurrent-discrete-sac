@@ -27,17 +27,17 @@ def parse_args():
         help="seed of the experiment")
     parser.add_argument("--cuda", type=lambda x: bool(strtobool(x)), default=True, nargs="?", const=True,
         help="if toggled, cuda will be enabled by default")
-    parser.add_argument("--wandb-project", type=str, default="test",
+    parser.add_argument("--wandb-project", type=str, default="sac_gridverse",
         help="wandb project name")
     parser.add_argument("--wandb-dir", type=str, default="./",
         help="the wandb directory")
 
     # Algorithm specific arguments
-    parser.add_argument("--env-id", type=str, default="gridverse/gv_dynamic_obstacles.7x7.yaml",
+    parser.add_argument("--env-id", type=str, default="gridverse/gv_memory.7x7.yaml",
         help="the id of the environment")
     parser.add_argument("--total-timesteps", type=int, default=1000500,
         help="total timesteps of the experiments")
-    parser.add_argument("--maximum-episode-length", type=int, default=100,
+    parser.add_argument("--maximum-episode-length", type=int, default=200,
         help="maximum length for episodes for gym POMDP environment")
     parser.add_argument("--buffer-size", type=int, default=int(1e5),
         help="the replay memory buffer size")
@@ -61,17 +61,19 @@ def parse_args():
         help="Entropy regularization coefficient.")
     parser.add_argument("--autotune", type=lambda x:bool(strtobool(x)), default=True, nargs="?", const=True,
         help="automatic tuning of the entropy coefficient")
+    parser.add_argument("--target-entropy-scaling", type=float, default=0.3,
+        help="scaling of the target entropy value")
 
     # Checkpointing specific arguments
     parser.add_argument("--save", type=lambda x:bool(strtobool(x)), default=True, nargs="?", const=True,
         help="checkpoint saving during training")
     parser.add_argument("--save-checkpoint-dir", type=str, default="./trained_models/",
         help="path to directory to save checkpoints in")
-    parser.add_argument("--checkpoint-interval", type=int, default=100000,
+    parser.add_argument("--checkpoint-interval", type=int, default=25000,
         help="how often to save checkpoints during training (in timesteps)")
-    parser.add_argument("--resume", type=lambda x: bool(strtobool(x)), default=False, nargs="?", const=True,
+    parser.add_argument("--resume", type=lambda x: bool(strtobool(x)), default=True, nargs="?", const=True,
         help="whether to resume training from a checkpoint")
-    parser.add_argument("--resume-checkpoint-path", type=str, default=None,
+    parser.add_argument("--resume-checkpoint-path", type=str, default="trained_models/sac_gridverse_obs_discrete_action_uvalj7z1/global_step_25000.pth",
         help="path to checkpoint to resume training from")
     parser.add_argument("--run-id", type=str, default=None,
         help="wandb unique run id for resuming")
@@ -107,7 +109,7 @@ if __name__ == "__main__":
             name=run_name,
             save_code=True,
             settings=wandb.Settings(code_dir="."),
-            mode="offline",
+            mode="online",
         )
 
     # Set training device
@@ -157,11 +159,6 @@ if __name__ == "__main__":
     )
     actor_optimizer = optim.Adam(list(actor.parameters()), lr=args.policy_lr)
 
-    # Watch gradients
-    wandb.watch(actor, log="all")
-    wandb.watch(qf1, log="all")
-    wandb.watch(qf2, log="all")
-
     # If resuming training, load models and optimizers
     if args.resume:
         actor.load_state_dict(checkpoint["model_state_dict"]["actor_state_dict"])
@@ -180,7 +177,7 @@ if __name__ == "__main__":
 
     # Automatic entropy tuning
     if args.autotune:
-        target_entropy = -0.3 * torch.log(1 / torch.tensor(env.action_space.n))
+        target_entropy = -args.target_entropy_scaling * torch.log(1 / torch.tensor(env.action_space.n))
         if args.resume:
             log_alpha = checkpoint["model_state_dict"]["log_alpha"]
         else:

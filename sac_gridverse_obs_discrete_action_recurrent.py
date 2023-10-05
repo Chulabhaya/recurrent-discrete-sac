@@ -30,7 +30,7 @@ def parse_args():
         help="seed of the experiment")
     parser.add_argument("--cuda", type=lambda x: bool(strtobool(x)), default=True, nargs="?", const=True,
         help="if toggled, cuda will be enabled by default")
-    parser.add_argument("--wandb-project", type=str, default="test",
+    parser.add_argument("--wandb-project", type=str, default="test2",
         help="wandb project name")
     parser.add_argument("--wandb-dir", type=str, default="./",
         help="the wandb directory")
@@ -66,6 +66,8 @@ def parse_args():
         help="Entropy regularization coefficient.")
     parser.add_argument("--autotune", type=lambda x:bool(strtobool(x)), default=True, nargs="?", const=True,
         help="automatic tuning of the entropy coefficient")
+    parser.add_argument("--target-entropy-scaling", type=float, default=0.3,
+        help="scaling of the target entropy value")
 
     # Checkpointing specific arguments
     parser.add_argument("--save", type=lambda x:bool(strtobool(x)), default=True, nargs="?", const=True,
@@ -112,7 +114,7 @@ if __name__ == "__main__":
             name=run_name,
             save_code=True,
             settings=wandb.Settings(code_dir="."),
-            mode="offline",
+            mode="online",
         )
 
     # Set training device
@@ -184,7 +186,7 @@ if __name__ == "__main__":
 
     # Automatic entropy tuning
     if args.autotune:
-        target_entropy = -0.3 * torch.log(1 / torch.tensor(env.action_space.n))
+        target_entropy = -args.target_entropy_scaling * torch.log(1 / torch.tensor(env.action_space.n))
         if args.resume:
             log_alpha = checkpoint["model_state_dict"]["log_alpha"]
         else:

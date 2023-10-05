@@ -27,7 +27,7 @@ def parse_args():
         help="seed of the experiment")
     parser.add_argument("--cuda", type=lambda x: bool(strtobool(x)), default=True, nargs="?", const=True,
         help="if toggled, cuda will be enabled by default")
-    parser.add_argument("--wandb-project", type=str, default="test7_keydoor",
+    parser.add_argument("--wandb-project", type=str, default="resume_test3",
         help="wandb project name")
     parser.add_argument("--wandb-dir", type=str, default="./",
         help="the wandb directory")
@@ -35,7 +35,7 @@ def parse_args():
     # Algorithm specific arguments
     parser.add_argument("--env-id", type=str, default="gridverse/gv_keydoor.7x7.yaml",
         help="the id of the environment")
-    parser.add_argument("--total-timesteps", type=int, default=100500,
+    parser.add_argument("--total-timesteps", type=int, default=40500,
         help="total timesteps of the experiments")
     parser.add_argument("--maximum-episode-length", type=int, default=100,
         help="maximum length for episodes for gym POMDP environment")
@@ -69,7 +69,7 @@ def parse_args():
         help="path to directory to save checkpoints in")
     parser.add_argument("--checkpoint-interval", type=int, default=10000,
         help="how often to save checkpoints during training (in timesteps)")
-    parser.add_argument("--resume", type=lambda x: bool(strtobool(x)), default=True, nargs="?", const=True,
+    parser.add_argument("--resume", type=lambda x: bool(strtobool(x)), default=False, nargs="?", const=True,
         help="whether to resume training from a checkpoint")
     parser.add_argument("--resume-checkpoint-path", type=str, default="global_step_40000.pth",
         help="path to checkpoint to resume training from")
@@ -107,7 +107,7 @@ if __name__ == "__main__":
             name=run_name,
             save_code=True,
             settings=wandb.Settings(code_dir="."),
-            mode="offline",
+            mode="online",
         )
 
     # Set training device
