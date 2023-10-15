@@ -1137,3 +1137,162 @@ class RecurrentDiscreteActorGridVerseObs(nn.Module):
         log_action_probs = torch.log(action_probs + zero_probs)
 
         return actions, action_probs, log_action_probs, out_hidden
+
+
+class DiscreteCriticMiniGridObs(nn.Module):
+    """Discrete soft Q-network model for discrete SAC with discrete actions
+    and MiniGrid observations."""
+
+    def __init__(self, env):
+        """Initialize the critic model.
+
+        Parameters
+        ----------
+        env : gym environment
+            Gym environment being used for learning.
+        """
+        super().__init__()
+
+        # Process image
+        self.obj_embedding = nn.Embedding(32, 4)
+        self.color_embedding = nn.Embedding(32, 4)
+        self.state_embedding = nn.Embedding(32, 4)
+        self.conv1 = nn.Conv2d(in_channels=12, out_channels=32, kernel_size=2, stride=2)
+        self.conv2 = nn.Conv2d(in_channels=32, out_channels=64, kernel_size=2, stride=1)
+
+        # Remainder of network
+        self.fc1 = nn.Linear(256, 128)
+        self.fc2 = nn.Linear(128, env.action_space.n)
+
+    def forward(self, states):
+        """
+        Calculates Q-values for each state-action.
+
+        Parameters
+        ----------
+        states : tensor
+            States or observations.
+
+        Returns
+        -------
+        q_values : tensor
+            Q-values for all actions possible with input state.
+        """
+        # Generate embeddings
+        obj_embedding = self.obj_embedding(states[:, :, :, 0])
+        color_embedding = self.color_embedding(states[:, :, :, 1])
+        state_embedding = self.state_embedding(states[:, :, :, 2])
+
+        # Combine embeddings
+        combined_embedding = torch.cat((obj_embedding, color_embedding, state_embedding), dim=3)
+
+        # Pass through feature extractor
+        combined_embedding = combined_embedding.permute(
+            0, 3, 1, 2
+        )
+        features = F.relu(self.conv1(combined_embedding))
+        features = F.relu(self.conv2(features))
+        features = torch.flatten(features, start_dim=1)
+
+        # Process extracted features with FC layers
+        x = F.relu(self.fc1(features))
+
+        # Rest of the network
+        q_values = self.fc2(x)
+
+        return q_values
+
+
+class DiscreteActorMiniGridObs(nn.Module):
+    """Discrete actor model for discrete SAC with discrete actions
+    and GridVerse observations."""
+
+    def __init__(self, env):
+        """Initialize the actor model.
+
+        Parameters
+        ----------
+        env : gym environment
+            Gym environment being used for learning.
+        """
+        super().__init__()
+
+        # Process image
+        self.obj_embedding = nn.Embedding(32, 4)
+        self.color_embedding = nn.Embedding(32, 4)
+        self.state_embedding = nn.Embedding(32, 4)
+        self.conv1 = nn.Conv2d(in_channels=12, out_channels=32, kernel_size=2, stride=2)
+        self.conv2 = nn.Conv2d(in_channels=32, out_channels=64, kernel_size=2, stride=1)
+
+        # Remainder of network
+        self.fc1 = nn.Linear(256, 128)
+        self.fc2 = nn.Linear(128, env.action_space.n)
+        self.softmax = nn.Softmax(dim=-1)
+
+    def forward(self, states):
+        """
+        Calculates probabilities for taking each action given a state.
+
+        Parameters
+        ----------
+        states : tensor
+            States or observations.
+
+        Returns
+        -------
+        action_probs : tensor
+            Probabilities for all actions possible with input state.
+        """
+        # Generate embeddings
+        obj_embedding = self.obj_embedding(states[:, :, :, 0])
+        color_embedding = self.color_embedding(states[:, :, :, 1])
+        state_embedding = self.state_embedding(states[:, :, :, 2])
+
+        # Combine embeddings
+        combined_embedding = torch.cat((obj_embedding, color_embedding, state_embedding), dim=3)
+
+        # Pass through feature extractor
+        combined_embedding = combined_embedding.permute(
+            0, 3, 1, 2
+        )
+        features = F.relu(self.conv1(combined_embedding))
+        features = F.relu(self.conv2(features))
+        features = torch.flatten(features, start_dim=1)
+
+        # Process extracted features with FC layers
+        x = F.relu(self.fc1(features))
+
+        # Rest of the network
+        action_logits = self.fc2(x)
+        action_probs = self.softmax(action_logits)
+
+        return action_probs
+
+    def get_actions(self, states):
+        """
+        Calculates actions by sampling from action distribution.
+
+        Parameters
+        ----------
+        states : tensor
+            States or observations.
+
+        Returns
+        -------
+        actions : tensor
+            Sampled actions from action distributions.
+        action_probs : tensor
+            Probabilities for all actions possible with input state.
+        log_action_probs : tensor
+            Logs of action probabilities, used for entropy.
+        """
+        action_probs = self.forward(states)
+
+        dist = Categorical(action_probs)
+        actions = dist.sample().to(states.device)
+
+        # Calculate log of action probabilities for use with entropy calculations
+        zero_probs = (action_probs == 0.0).float() * 1e-10
+        log_action_probs = torch.log(action_probs + zero_probs)
+
+        return actions, action_probs, log_action_probs

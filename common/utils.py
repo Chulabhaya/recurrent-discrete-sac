@@ -1,22 +1,23 @@
 import os
 import random
 
-import gym_gridverse
+#import gym_gridverse
 import gymnasium as gym
-import gymnasium_pomdps
+# import gymnasium_pomdps
 import numpy as np
 import torch
-from gym_gridverse.envs.yaml.factory import factory_env_from_yaml
-from gym_gridverse.gym import GymEnvironment, GymStateWrapper
-from gym_gridverse.outer_env import OuterEnv
-from gym_gridverse.representations.observation_representations import (
-    make_observation_representation,
-)
-from gym_gridverse.representations.state_representations import (
-    make_state_representation,
-)
+# from gym_gridverse.envs.yaml.factory import factory_env_from_yaml
+# from gym_gridverse.gym import GymEnvironment, GymStateWrapper
+# from gym_gridverse.outer_env import OuterEnv
+# from gym_gridverse.representations.observation_representations import \
+#     make_observation_representation
+# from gym_gridverse.representations.state_representations import \
+#     make_state_representation
+#from gymnasium_pomdps.wrappers import MDP
+from minigrid.wrappers import FullyObsWrapper, ImgObsWrapper
 
 import simple_pomdps
+
 
 def make_gridverse_env(env_id, seed, max_episode_len=None, mdp=False):
     """
@@ -52,6 +53,59 @@ def make_gridverse_env(env_id, seed, max_episode_len=None, mdp=False):
     else:
         env = gym.make("GymV21Environment-v0", env=GymEnvironment(outer_env))
 
+    if max_episode_len is not None:
+        env = gym.wrappers.TimeLimit(env, max_episode_steps=max_episode_len)
+    env = gym.wrappers.RecordEpisodeStatistics(env)
+    env.action_space.seed(seed)
+    env.observation_space.seed(seed)
+
+    return env
+
+
+def make_minigrid_env(env_id, seed, max_episode_len=None, mdp=False):
+    """
+    Generate environment with seeding/wrapping.
+
+    Args:
+        env_id: ID of the environment to use.
+        seed: Seed to set for environment.
+        max_episode_len: Episode timeout length.
+
+    Returns:
+        Generated environment.
+
+    """
+    if max_episode_len is None:
+        env = gym.make(env_id)
+    else:
+        env = gym.make(env_id, max_steps=max_episode_len)
+
+    if mdp:
+        env = FullyObsWrapper(env)
+    env = ImgObsWrapper(env)
+    env = gym.wrappers.RecordEpisodeStatistics(env)
+    env.action_space.seed(seed)
+    env.observation_space.seed(seed)
+
+    return env
+
+
+def make_gym_pomdp_env(env_id, seed, max_episode_len=None, mdp=False):
+    """
+    Generate environment with seeding/wrapping.
+
+    Args:
+        env_id: ID of the environment to use.
+        seed: Seed to set for environment.
+        max_episode_len: Episode timeout length.
+
+    Returns:
+        Generated environment.
+
+    """
+    env = gym.make(env_id)
+    if mdp:
+        env = MDP(env)
     if max_episode_len is not None:
         env = gym.wrappers.TimeLimit(env, max_episode_steps=max_episode_len)
     env = gym.wrappers.RecordEpisodeStatistics(env)

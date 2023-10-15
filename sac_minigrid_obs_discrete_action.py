@@ -11,9 +11,9 @@ import torch.nn.functional as F
 import torch.optim as optim
 
 import wandb
-from common.models import DiscreteActorGridVerseObs, DiscreteCriticGridVerseObs
-from common.replay_buffer import GridVerseReplayBuffer as ReplayBuffer
-from common.utils import make_gridverse_env, save, set_seed
+from common.models import DiscreteCriticMiniGridObs, DiscreteActorMiniGridObs
+from common.replay_buffer import ReplayBuffer
+from common.utils import make_minigrid_env, save, set_seed
 
 
 def parse_args():
@@ -27,17 +27,17 @@ def parse_args():
         help="seed of the experiment")
     parser.add_argument("--cuda", type=lambda x: bool(strtobool(x)), default=True, nargs="?", const=True,
         help="if toggled, cuda will be enabled by default")
-    parser.add_argument("--wandb-project", type=str, default="sac_gridverse",
+    parser.add_argument("--wandb-project", type=str, default="sac_minigrid",
         help="wandb project name")
     parser.add_argument("--wandb-dir", type=str, default="./",
         help="the wandb directory")
 
     # Algorithm specific arguments
-    parser.add_argument("--env-id", type=str, default="gridverse/gv_memory.7x7.yaml",
+    parser.add_argument("--env-id", type=str, default="MiniGrid-Dynamic-Obstacles-6x6-v0",
         help="the id of the environment")
     parser.add_argument("--total-timesteps", type=int, default=1000500,
         help="total timesteps of the experiments")
-    parser.add_argument("--maximum-episode-length", type=int, default=200,
+    parser.add_argument("--maximum-episode-length", type=int, default=100,
         help="maximum length for episodes for gym POMDP environment")
     parser.add_argument("--buffer-size", type=int, default=int(1e5),
         help="the replay memory buffer size")
@@ -61,7 +61,7 @@ def parse_args():
         help="Entropy regularization coefficient.")
     parser.add_argument("--autotune", type=lambda x:bool(strtobool(x)), default=True, nargs="?", const=True,
         help="automatic tuning of the entropy coefficient")
-    parser.add_argument("--target-entropy-scaling", type=float, default=0.7,
+    parser.add_argument("--target-entropy-scaling", type=float, default=0.3,
         help="scaling of the target entropy value")
 
     # Checkpointing specific arguments
@@ -109,7 +109,7 @@ if __name__ == "__main__":
             name=run_name,
             save_code=True,
             settings=wandb.Settings(code_dir="."),
-            mode="offline",
+            mode="online",
         )
 
     # Set training device
@@ -136,7 +136,7 @@ if __name__ == "__main__":
             )
 
     # Env setup
-    env = make_gridverse_env(
+    env = make_minigrid_env(
         args.env_id,
         args.seed,
         max_episode_len=args.maximum_episode_length,
@@ -147,11 +147,11 @@ if __name__ == "__main__":
     ), "only discrete action space is supported"
 
     # Initialize models and optimizers
-    actor = DiscreteActorGridVerseObs(env).to(device)
-    qf1 = DiscreteCriticGridVerseObs(env).to(device)
-    qf2 = DiscreteCriticGridVerseObs(env).to(device)
-    qf1_target = DiscreteCriticGridVerseObs(env).to(device)
-    qf2_target = DiscreteCriticGridVerseObs(env).to(device)
+    actor = DiscreteActorMiniGridObs(env).to(device)
+    qf1 = DiscreteCriticMiniGridObs(env).to(device)
+    qf2 = DiscreteCriticMiniGridObs(env).to(device)
+    qf1_target = DiscreteCriticMiniGridObs(env).to(device)
+    qf2_target = DiscreteCriticMiniGridObs(env).to(device)
     qf1_target.load_state_dict(qf1.state_dict())
     qf2_target.load_state_dict(qf2.state_dict())
     q_optimizer = optim.Adam(
@@ -198,7 +198,6 @@ if __name__ == "__main__":
         args.buffer_size,
         episodic=False,
         stateful=False,
-        mdp=True,
         device=device,
     )
     # If resuming training, then load previous replay buffer
@@ -233,17 +232,7 @@ if __name__ == "__main__":
         if global_step < args.learning_starts:
             action = env.action_space.sample()
         else:
-            action, _, _ = actor.get_actions(
-                {
-                    "grid": torch.tensor(obs["grid"]).to(device).unsqueeze(0),
-                    "agent_id_grid": torch.tensor(obs["agent_id_grid"])
-                    .to(device)
-                    .unsqueeze(0),
-                    "agent": torch.tensor(obs["agent"], dtype=torch.float32)
-                    .to(device)
-                    .unsqueeze(0),
-                }
-            )
+            action, _, _ = actor.get_actions(torch.tensor(obs).to(device).unsqueeze(0).long())
             action = action.detach().cpu().numpy()[0]
 
         # Take step in environment
@@ -272,6 +261,8 @@ if __name__ == "__main__":
             observations, actions, next_observations, rewards, terminateds = rb.sample(
                 args.batch_size
             )
+            observations = observations.long()
+            next_observations = next_observations.long()
             # ---------- update critic ---------- #
             # no grad because target networks are updated separately (pg. 6 of
             # updated SAC paper)
