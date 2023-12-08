@@ -796,12 +796,12 @@ class DiscreteCriticGridVerseObs(nn.Module):
         # Process image and direction
         self.grid_embedding = nn.Embedding(32, 4)
         self.agent_id_grid_embedding = nn.Embedding(2, 4)
-        self.conv1 = nn.Conv2d(in_channels=16, out_channels=32, kernel_size=2, stride=2)
-        self.conv2 = nn.Conv2d(in_channels=32, out_channels=64, kernel_size=2, stride=1)
+        self.conv1 = nn.Conv2d(in_channels=16, out_channels=32, kernel_size=2)
+        self.conv2 = nn.Conv2d(in_channels=32, out_channels=64, kernel_size=2)
 
         # Remainder of network
-        self.fc1 = nn.Linear(262, 128)
-        self.fc2 = nn.Linear(128, env.action_space.n)
+        self.fc1 = nn.Linear(1606, 256)
+        self.fc2 = nn.Linear(256, env.action_space.n)
 
     def forward(self, states):
         """
@@ -856,12 +856,12 @@ class DiscreteActorGridVerseObs(nn.Module):
         # Process image and direction
         self.grid_embedding = nn.Embedding(32, 4)
         self.agent_id_grid_embedding = nn.Embedding(2, 4)
-        self.conv1 = nn.Conv2d(in_channels=16, out_channels=32, kernel_size=2, stride=2)
-        self.conv2 = nn.Conv2d(in_channels=32, out_channels=64, kernel_size=2, stride=1)
+        self.conv1 = nn.Conv2d(in_channels=16, out_channels=32, kernel_size=2)
+        self.conv2 = nn.Conv2d(in_channels=32, out_channels=64, kernel_size=2)
 
         # Remainder of network
-        self.fc1 = nn.Linear(262, 128)
-        self.fc2 = nn.Linear(128, env.action_space.n)
+        self.fc1 = nn.Linear(1606, 256)
+        self.fc2 = nn.Linear(256, env.action_space.n)
         self.softmax = nn.Softmax(dim=-1)
 
     def forward(self, states):
@@ -947,16 +947,14 @@ class RecurrentDiscreteCriticGridVerseObs(nn.Module):
         # Process image and direction
         self.grid_embedding = nn.Embedding(32, 4)
         self.agent_id_grid_embedding = nn.Embedding(2, 4)
-        # self.conv1 = nn.Conv2d(in_channels=16, out_channels=32, kernel_size=2, stride=2)
-        # self.conv2 = nn.Conv2d(in_channels=32, out_channels=64, kernel_size=2, stride=1)
-        self.fc_emb = nn.Linear(96, 256)
+        self.fc_emb = nn.Linear(96, 128)
 
         # Process with LSTM
-        self.lstm1 = nn.LSTM(256, 128)
+        self.lstm1 = nn.LSTM(128, 256)
 
         # Remainder of network
-        self.fc1 = nn.Linear(128, 128)
-        self.fc2 = nn.Linear(128, env.action_space.n)
+        self.fc1 = nn.Linear(256, 256)
+        self.fc2 = nn.Linear(256, env.action_space.n)
 
     def forward(self, states, seq_lengths):
         """
@@ -981,23 +979,6 @@ class RecurrentDiscreteCriticGridVerseObs(nn.Module):
         unified_grid_emb = torch.cat((grid_emb, agent_id_grid_emb), dim=4).permute(
             0, 1, 4, 2, 3
         )
-        # time_dim = unified_grid_emb.shape[0]
-        # batch_dim = unified_grid_emb.shape[1]
-        # unified_grid_emb = unified_grid_emb.view(
-        #     -1,
-        #     unified_grid_emb.shape[2],
-        #     unified_grid_emb.shape[3],
-        #     unified_grid_emb.shape[4],
-        # )
-        # unified_grid_emb = F.relu(self.conv1(unified_grid_emb))
-        # unified_grid_emb = F.relu(self.conv2(unified_grid_emb))
-        # unified_grid_emb = unified_grid_emb.view(
-        #     time_dim,
-        #     batch_dim,
-        #     unified_grid_emb.shape[1],
-        #     unified_grid_emb.shape[2],
-        #     unified_grid_emb.shape[3],
-        # )
         x = torch.flatten(unified_grid_emb, start_dim=2)
         x = F.relu(self.fc_emb(x))
 
@@ -1031,16 +1012,14 @@ class RecurrentDiscreteActorGridVerseObs(nn.Module):
         # Process image and direction
         self.grid_embedding = nn.Embedding(32, 4)
         self.agent_id_grid_embedding = nn.Embedding(2, 4)
-        # self.conv1 = nn.Conv2d(in_channels=16, out_channels=32, kernel_size=2, stride=2)
-        # self.conv2 = nn.Conv2d(in_channels=32, out_channels=64, kernel_size=2, stride=1)
-        self.fc_emb = nn.Linear(96, 256)
+        self.fc_emb = nn.Linear(96, 128)
 
         # Process with LSTM
-        self.lstm1 = nn.LSTM(256, 128)
+        self.lstm1 = nn.LSTM(128, 256)
 
         # Remainder of network
-        self.fc1 = nn.Linear(128, 128)
-        self.fc2 = nn.Linear(128, env.action_space.n)
+        self.fc1 = nn.Linear(256, 256)
+        self.fc2 = nn.Linear(256, env.action_space.n)
         self.softmax = nn.Softmax(dim=-1)
 
     def forward(self, states, seq_lengths, in_hidden=None):
@@ -1070,23 +1049,6 @@ class RecurrentDiscreteActorGridVerseObs(nn.Module):
         unified_grid_emb = torch.cat((grid_emb, agent_id_grid_emb), dim=4).permute(
             0, 1, 4, 2, 3
         )
-        # time_dim = unified_grid_emb.shape[0]
-        # batch_dim = unified_grid_emb.shape[1]
-        # unified_grid_emb = unified_grid_emb.view(
-        #     -1,
-        #     unified_grid_emb.shape[2],
-        #     unified_grid_emb.shape[3],
-        #     unified_grid_emb.shape[4],
-        # )
-        # unified_grid_emb = F.relu(self.conv1(unified_grid_emb))
-        # unified_grid_emb = F.relu(self.conv2(unified_grid_emb))
-        # unified_grid_emb = unified_grid_emb.view(
-        #     time_dim,
-        #     batch_dim,
-        #     unified_grid_emb.shape[1],
-        #     unified_grid_emb.shape[2],
-        #     unified_grid_emb.shape[3],
-        # )
         x = torch.flatten(unified_grid_emb, start_dim=2)
         x = F.relu(self.fc_emb(x))
 
